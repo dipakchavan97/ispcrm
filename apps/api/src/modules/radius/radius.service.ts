@@ -1,8 +1,13 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Optional } from '@nestjs/common';
 import { prisma } from '@isp-crm/database';
+import { CoaAction, CoaRequestType } from '@isp-crm/shared';
+import { RadiusCoaQueueService } from './radius-coa-queue.service';
 
 @Injectable()
 export class RadiusService {
+  constructor(
+    @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
+  ) {}
   async getActiveSessions(organizationId: string, filters: { username?: string }) {
     // Get all customer PPPoE usernames belonging to this organization
     const orgCustomers = await prisma.customer.findMany({
@@ -65,11 +70,25 @@ export class RadiusService {
       throw new ForbiddenException('Cannot disconnect a session belonging to another organization');
     }
 
+    let jobId: string | undefined;
+    if (this.coaQueueService) {
+      const qRes = await this.coaQueueService.queueCoaJob({
+        organizationId,
+        customerId: customer.id,
+        username: session.username,
+        action: CoaAction.SUSPEND,
+        requestType: CoaRequestType.DISCONNECT,
+        reason: `Manual session disconnect for sessionId ${sessionId}`,
+      });
+      jobId = qRes.jobId;
+    }
+
     return {
       message: 'RFC 3576 Disconnect-Request (PoD) queued to worker',
       sessionId,
       username: session.username,
       status: 'QUEUED',
+      jobId,
     };
   }
 

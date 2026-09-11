@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { prisma } from '@isp-crm/database';
 import {
@@ -15,7 +16,10 @@ import {
   calculateGracePeriodEndDate,
   validateSubscriptionTransition,
   DEFAULT_TIMEZONE,
+  CoaAction,
+  CoaRequestType,
 } from '@isp-crm/shared';
+import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
 export interface SubscriptionListFilter {
   status?: string;
@@ -25,6 +29,9 @@ export interface SubscriptionListFilter {
 
 @Injectable()
 export class SubscriptionsService {
+  constructor(
+    @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
+  ) {}
   /**
    * Helper to verify and sanitize adminUserId against foreign key constraint
    */
@@ -492,7 +499,7 @@ export class SubscriptionsService {
     const rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -520,20 +527,42 @@ export class SubscriptionsService {
         },
       });
 
-      await tx.radReply.deleteMany({
-        where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
-      });
-      await tx.radReply.create({
-        data: {
-          username: sub.customer.username,
-          attribute: 'Mikrotik-Rate-Limit',
-          op: '=',
-          value: rateLimit,
-        },
-      });
+      if (sub.customer) {
+        await tx.radReply.deleteMany({
+          where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
+        });
+        await tx.radReply.create({
+          data: {
+            username: sub.customer.username,
+            attribute: 'Mikrotik-Rate-Limit',
+            op: '=',
+            value: rateLimit,
+          },
+        });
+      }
 
       return updated;
     });
+
+    // Asynchronously queue RADIUS CoA to apply upgraded bandwidth dynamically to live router session
+    const subscriberUsername = sub.customer?.username;
+    if (this.coaQueueService && subscriberUsername) {
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: sub.id,
+          username: subscriberUsername,
+          action: CoaAction.PLAN_UPGRADE,
+          requestType: CoaRequestType.COA,
+          rateLimit,
+          reason: reason || `Upgraded to ${newPlan.name}`,
+          adminUserId: finalAdminUserId || undefined,
+        })
+        .catch((err) => console.warn(`[SubscriptionsService] Failed to enqueue CoA for upgrade: ${err.message}`));
+    }
+
+    return result;
   }
 
   /**
@@ -593,7 +622,7 @@ export class SubscriptionsService {
     const rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -621,20 +650,42 @@ export class SubscriptionsService {
         },
       });
 
-      await tx.radReply.deleteMany({
-        where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
-      });
-      await tx.radReply.create({
-        data: {
-          username: sub.customer.username,
-          attribute: 'Mikrotik-Rate-Limit',
-          op: '=',
-          value: rateLimit,
-        },
-      });
+      if (sub.customer) {
+        await tx.radReply.deleteMany({
+          where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
+        });
+        await tx.radReply.create({
+          data: {
+            username: sub.customer.username,
+            attribute: 'Mikrotik-Rate-Limit',
+            op: '=',
+            value: rateLimit,
+          },
+        });
+      }
 
       return updated;
     });
+
+    // Asynchronously queue RADIUS CoA to apply downgraded bandwidth dynamically to live router session
+    const subscriberUsername = sub.customer?.username;
+    if (this.coaQueueService && subscriberUsername) {
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: sub.id,
+          username: subscriberUsername,
+          action: CoaAction.PLAN_DOWNGRADE,
+          requestType: CoaRequestType.COA,
+          rateLimit,
+          reason: reason || `Downgraded to ${newPlan.name}`,
+          adminUserId: finalAdminUserId || undefined,
+        })
+        .catch((err) => console.warn(`[SubscriptionsService] Failed to enqueue CoA for downgrade: ${err.message}`));
+    }
+
+    return result;
   }
 
   /**
@@ -690,7 +741,7 @@ export class SubscriptionsService {
     validateSubscriptionTransition(sub.status as SubscriptionStatus, SubscriptionStatus.SUSPENDED, 'suspend');
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: { status: SubscriptionStatus.SUSPENDED },
@@ -714,10 +765,31 @@ export class SubscriptionsService {
         data: { status: CustomerStatus.SUSPENDED },
       });
 
-      await this.syncRadiusOnDeactivation(tx, sub.customer);
+      if (sub.customer) {
+        await this.syncRadiusOnDeactivation(tx, sub.customer);
+      }
 
       return updated;
     });
+
+    // Asynchronously queue RADIUS Disconnect-Request (PoD) to terminate live session on router
+    const subscriberUsername = sub.customer?.username;
+    if (this.coaQueueService && subscriberUsername) {
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: sub.id,
+          username: subscriberUsername,
+          action: CoaAction.SUSPEND,
+          requestType: CoaRequestType.DISCONNECT,
+          reason: reason || 'Suspension applied',
+          adminUserId: finalAdminUserId || undefined,
+        })
+        .catch((err) => console.warn(`[SubscriptionsService] Failed to enqueue Disconnect for suspend: ${err.message}`));
+    }
+
+    return result;
   }
 
   /**
@@ -756,7 +828,7 @@ export class SubscriptionsService {
     const rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: { status: targetStatus },
@@ -775,10 +847,32 @@ export class SubscriptionsService {
         },
       });
 
-      await this.syncRadiusOnActivation(tx, sub.customer, rateLimit);
+      if (sub.customer) {
+        await this.syncRadiusOnActivation(tx, sub.customer, rateLimit);
+      }
 
       return updated;
     });
+
+    // Asynchronously queue RADIUS CoA to restore speed or reconnect session
+    const subscriberUsername = sub.customer?.username;
+    if (this.coaQueueService && subscriberUsername) {
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: sub.id,
+          username: subscriberUsername,
+          action: CoaAction.REACTIVATE,
+          requestType: CoaRequestType.COA,
+          rateLimit,
+          reason: 'Subscription reactivated',
+          adminUserId: finalAdminUserId || undefined,
+        })
+        .catch((err) => console.warn(`[SubscriptionsService] Failed to enqueue CoA for reactivate: ${err.message}`));
+    }
+
+    return result;
   }
 
   /**

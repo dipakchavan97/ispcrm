@@ -1,11 +1,14 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { prisma } from '@isp-crm/database';
 import {
   CustomerStatus,
   SubscriptionStatus,
   AuditAction,
   generateMikrotikRateLimit,
+  CoaAction,
+  CoaRequestType,
 } from '@isp-crm/shared';
+import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
 export interface CustomerListFilters {
   page?: number;
@@ -18,6 +21,9 @@ export interface CustomerListFilters {
 
 @Injectable()
 export class CustomersService {
+  constructor(
+    @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
+  ) {}
   /**
    * List subscribers strictly scoped to tenant organization with server-side pagination & filtering
    */
@@ -472,8 +478,12 @@ export class CustomersService {
     }
 
     const oldStatus = customer.status;
+    const activeSub = customer.subscriptions[0];
+    const rateLimit = activeSub?.plan
+      ? generateMikrotikRateLimit(activeSub.plan)
+      : '50M/50M';
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.customer.update({
         where: { id: customer.id },
         data: {
@@ -481,11 +491,6 @@ export class CustomersService {
           notes: notes ? (customer.notes ? `${customer.notes}\n${notes}` : notes) : customer.notes,
         },
       });
-
-      const activeSub = customer.subscriptions[0];
-      const rateLimit = activeSub?.plan
-        ? generateMikrotikRateLimit(activeSub.plan)
-        : '50M/50M';
 
       if (newStatus === CustomerStatus.ACTIVE) {
         // Re-enable radcheck credentials
@@ -576,6 +581,40 @@ export class CustomersService {
         customer: this.formatCustomer(updated),
       };
     });
+
+    // Asynchronously dispatch CoA or Disconnect depending on target status
+    if (this.coaQueueService && customer.username) {
+      if (newStatus === CustomerStatus.SUSPENDED || newStatus === CustomerStatus.TERMINATED) {
+        this.coaQueueService
+          .queueCoaJob({
+            organizationId,
+            customerId: customer.id,
+            subscriptionId: activeSub?.id,
+            username: customer.username,
+            action: CoaAction.SUSPEND,
+            requestType: CoaRequestType.DISCONNECT,
+            reason: notes || `Customer transitioned to ${newStatus}`,
+            adminUserId,
+          })
+          .catch((err) => console.warn(`[CustomersService] Failed to enqueue Disconnect on suspend: ${err.message}`));
+      } else if (newStatus === CustomerStatus.ACTIVE && oldStatus !== CustomerStatus.ACTIVE) {
+        this.coaQueueService
+          .queueCoaJob({
+            organizationId,
+            customerId: customer.id,
+            subscriptionId: activeSub?.id,
+            username: customer.username,
+            action: CoaAction.REACTIVATE,
+            requestType: CoaRequestType.COA,
+            rateLimit,
+            reason: notes || 'Customer reactivated',
+            adminUserId,
+          })
+          .catch((err) => console.warn(`[CustomersService] Failed to enqueue CoA on reactivate: ${err.message}`));
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -612,12 +651,26 @@ export class CustomersService {
       orderBy: { acctstarttime: 'desc' },
     });
 
+    let jobId: string | undefined;
+    if (this.coaQueueService && customer.username) {
+      const qRes = await this.coaQueueService.queueCoaJob({
+        organizationId,
+        customerId: customer.id,
+        username: customer.username,
+        action: 'DISCONNECT',
+        requestType: CoaRequestType.DISCONNECT,
+        reason: 'Manual disconnect requested via customer API',
+      });
+      jobId = qRes.jobId;
+    }
+
     return {
       message: 'RFC 3576 Disconnect-Request (PoD) queued to MikroTik router',
       username: customer.username,
       pppoeUsername: customer.username,
       activeSessionId: session?.acctsessionid || null,
       nasIpAddress: session?.nasipaddress || null,
+      jobId,
       status: 'DISPATCHED',
     };
   }
