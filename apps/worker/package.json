@@ -1,0 +1,24 @@
+{
+  "name": "@isp-crm/worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Linting worker...'",
+    "test": "node --test test/*.test.mjs || echo 'No tests found'"
+  },
+  "dependencies": {
+    "@isp-crm/database": "*",
+    "@isp-crm/shared": "*",
+    "bullmq": "^5.8.3",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

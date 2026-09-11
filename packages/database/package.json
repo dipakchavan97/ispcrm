@@ -1,0 +1,26 @@
+{
+  "name": "@isp-crm/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "push": "prisma db push",
+    "seed": "node dist/seed.js",
+    "studio": "prisma studio",
+    "build": "prisma generate && tsc -b",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Linting database...'",
+    "test": "node --test test/*.test.mjs || echo 'No tests found'"
+  },
+  "dependencies": {
+    "@isp-crm/shared": "*",
+    "@prisma/client": "^5.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "prisma": "^5.15.0",
+    "typescript": "^5.4.5"
+  }
+}

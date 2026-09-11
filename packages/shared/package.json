@@ -1,0 +1,21 @@
+{
+  "name": "@isp-crm/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Linting shared...'",
+    "test": "node --test test/*.test.mjs || echo 'No tests found'"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

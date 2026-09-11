@@ -1,0 +1,40 @@
+{
+  "name": "@isp-crm/api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Linting api...'",
+    "test": "node --test test/mikrotik.test.mjs test/mikrotik-integration.test.mjs test/freeradius-aaa.test.mjs test/payment-provider-idempotency.test.mjs test/billing.test.mjs test/auth-multitenancy.test.mjs test/customers-radius.test.mjs test/customers-crud.test.mjs test/plans.test.mjs test/subscriptions.test.mjs test/health.test.mjs"
+  },
+  "dependencies": {
+    "@isp-crm/database": "*",
+    "@isp-crm/shared": "*",
+    "@nestjs/common": "^10.3.9",
+    "@nestjs/config": "^3.2.2",
+    "@nestjs/core": "^10.3.9",
+    "@nestjs/platform-express": "^10.3.9",
+    "@nestjs/swagger": "^7.3.1",
+    "@nestjs/terminus": "^10.2.3",
+    "bcryptjs": "^2.4.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "decimal.js": "^10.6.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^10.3.9",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

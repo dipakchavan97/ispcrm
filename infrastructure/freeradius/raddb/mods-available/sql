@@ -1,0 +1,42 @@
+sql {
+    driver = "rlm_sql_postgresql"
+    dialect = "postgresql"
+
+    # Connection parameters
+    server = "postgres"
+    port = 5432
+    login = "postgres"
+    password = "postgres"
+    radius_db = "ispcrm"
+
+    # Tables
+    acct_table1 = "radacct"
+    acct_table2 = "radacct"
+    postauth_table = "radpostauth"
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+
+    # Read dynamic NAS list from `nas` table
+    read_clients = yes
+    client_table = "nas"
+
+    group_attribute = "SQL-Group"
+
+    # Connection pool configuration
+    pool {
+        start = 5
+        min = 4
+        max = 30
+        spare = 3
+        uses = 0
+        retry_delay = 30
+        lifetime = 0
+        idle_timeout = 60
+    }
+
+    # Standard PostgreSQL Queries
+    $INCLUDE ${modconfdir}/${.:name}/main/postgresql/queries.conf
+}

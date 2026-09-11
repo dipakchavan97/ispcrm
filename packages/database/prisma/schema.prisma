@@ -1,0 +1,563 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+// --------------------------------------------------------
+// CRM Enums
+// --------------------------------------------------------
+
+enum UserRole {
+  ISP_OWNER
+  ISP_ADMIN
+  BILLING
+  SUPPORT
+  TECHNICIAN
+  READ_ONLY
+}
+
+enum CustomerStatus {
+  LEAD
+  PENDING
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  TERMINATED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  GRACE
+  SUSPENDED
+  EXPIRED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  ONLINE_GATEWAY
+  CHEQUE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum RouterStatus {
+  ONLINE
+  OFFLINE
+  UNREACHABLE
+  ERROR
+}
+
+enum PlanStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  ANNUAL
+  CUSTOM
+}
+
+enum SpeedUnit {
+  MBPS
+  KBPS
+  GBPS
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  LOGIN
+  LOGOUT
+  SUSPEND_SUBSCRIBER
+  REACTIVATE_SUBSCRIBER
+  COA_DISCONNECT
+  COLLECT_PAYMENT
+  GENERATE_INVOICE
+}
+
+// --------------------------------------------------------
+// CRM Core Models
+// --------------------------------------------------------
+
+model Organization {
+  id              String            @id @default(uuid())
+  name            String
+  slug            String            @unique
+  legalName       String?
+  gstin           String?
+  email           String
+  phone           String
+  address         String?
+  city            String?
+  state           String?
+  stateCode       String?
+  pincode         String?
+  currency        String            @default("INR")
+  timezone        String            @default("Asia/Kolkata")
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  users           AdminUser[]
+  customers       Customer[]
+  plans           InternetPlan[]
+  routers         Router[]
+  policies        BandwidthPolicy[]
+  auditLogs       AuditLog[]
+  invoices        Invoice[]
+  payments        Payment[]
+
+  @@map("organizations")
+}
+
+model AdminUser {
+  id              String        @id @default(uuid())
+  organizationId  String
+  name            String
+  email           String
+  passwordHash     String
+  refreshTokenHash String?
+  role             UserRole      @default(ISP_ADMIN)
+  phone           String?
+  isActive        Boolean       @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  auditLogs       AuditLog[]
+  subscriptionHistories SubscriptionHistory[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("admin_users")
+}
+
+model Customer {
+  id                  String          @id @default(uuid())
+  organizationId      String
+  customerCode        String
+  name                String
+  mobile              String          @default("")
+  phone               String?
+  email               String?
+  alternatePhone      String?
+  address             String          @default("")
+  installationAddress String?
+  area                String?
+  city                String?
+  state               String?
+  pincode             String?
+  aadhaarNumber       String?
+  gstin               String?
+
+  // Network & PPPoE Identity
+  username            String          @unique
+  pppoeUsername       String?
+  pppoePassword       String          @default("123456")
+  staticIp            String?
+  macAddress          String?
+  
+  status              CustomerStatus  @default(LEAD)
+  installationDate    DateTime?
+  notes               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptions       Subscription[]
+  invoices            Invoice[]
+  payments            Payment[]
+
+  @@unique([organizationId, customerCode])
+  @@index([organizationId, status])
+  @@index([username])
+  @@index([mobile])
+  @@index([city])
+  @@index([area])
+  @@map("customers")
+}
+
+model InternetPlan {
+  id                   String            @id @default(uuid())
+  organizationId       String
+  name                 String
+  code                 String
+  description          String?
+  downloadSpeed        Decimal           @default(0) @db.Decimal(10, 2)
+  uploadSpeed          Decimal           @default(0) @db.Decimal(10, 2)
+  speedUnit            SpeedUnit         @default(MBPS)
+  downloadSpeedMbps    Int               @default(0)
+  uploadSpeedMbps      Int               @default(0)
+  validityDays         Int               @default(30)
+  billingCycle         BillingCycle      @default(MONTHLY)
+  price                Decimal           @db.Decimal(10, 2)
+  status               PlanStatus        @default(ACTIVE)
+  gstRatePercent       Decimal           @default(18.0) @db.Decimal(5, 2)
+  hsnSacCode           String            @default("998422")
+  dataLimitGb          Int?
+  fupDownloadSpeedMbps Int?
+  fupUploadSpeedMbps   Int?
+
+  burstDownloadMbps    Int?
+  burstUploadMbps      Int?
+  burstThresholdMbps   Int?
+  burstTimeSecs        Int?
+
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  organization         Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptions        Subscription[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+  @@index([organizationId, isActive])
+  @@map("internet_plans")
+}
+
+model BandwidthPolicy {
+  id              String            @id @default(uuid())
+  organizationId  String
+  name            String
+  rateLimitString String
+  priority        Int               @default(8)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@map("bandwidth_policies")
+}
+
+model Subscription {
+  id              String              @id @default(uuid())
+  organizationId  String
+  customerId      String
+  planId          String
+  status          SubscriptionStatus  @default(ACTIVE)
+  startDate       DateTime            @default(now())
+  endDate         DateTime
+  price           Decimal             @default(0) @db.Decimal(10, 2)
+  billingCycle    BillingCycle        @default(MONTHLY)
+  autoRenew       Boolean             @default(true)
+  gracePeriodDays Int                 @default(3)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  customer        Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  plan            InternetPlan        @relation(fields: [planId], references: [id])
+  invoices        Invoice[]
+  history         SubscriptionHistory[]
+
+  @@index([organizationId, status])
+  @@index([customerId])
+  @@index([endDate])
+  @@map("subscriptions")
+}
+
+model SubscriptionHistory {
+  id              String              @id @default(uuid())
+  organizationId  String
+  subscriptionId  String
+  fromStatus      SubscriptionStatus?
+  toStatus        SubscriptionStatus
+  action          String
+  reason          String?
+  adminUserId     String?
+  fromPlanId      String?
+  toPlanId        String?
+  oldEndDate      DateTime?
+  newEndDate      DateTime?
+  metadata        Json?
+  createdAt       DateTime            @default(now())
+
+  subscription    Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  adminUser       AdminUser?          @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([subscriptionId, createdAt])
+  @@index([organizationId])
+  @@map("subscription_history")
+}
+
+model Invoice {
+  id              String          @id @default(uuid())
+  organizationId  String
+  customerId      String
+  subscriptionId  String?
+  invoiceNumber   String
+  invoiceDate     DateTime        @default(now())
+  dueDate         DateTime
+  subtotal        Decimal         @db.Decimal(10, 2)
+  discountAmount  Decimal         @default(0) @db.Decimal(10, 2)
+  cgstAmount      Decimal         @default(0) @db.Decimal(10, 2)
+  sgstAmount      Decimal         @default(0) @db.Decimal(10, 2)
+  igstAmount      Decimal         @default(0) @db.Decimal(10, 2)
+  totalAmount     Decimal         @db.Decimal(10, 2)
+  paidAmount      Decimal         @default(0) @db.Decimal(10, 2)
+  status          InvoiceStatus   @default(ISSUED)
+  notes           String?
+  paidAt          DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscription    Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  items           InvoiceItem[]
+  payments        Payment[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status])
+  @@index([customerId])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id              String          @id @default(uuid())
+  invoiceId       String
+  description     String
+  sacCode         String          @default("998422")
+  quantity        Int             @default(1)
+  unitPrice       Decimal         @db.Decimal(10, 2)
+  discountAmount  Decimal         @default(0) @db.Decimal(10, 2)
+  taxRatePercent  Decimal         @default(18.0) @db.Decimal(5, 2)
+  taxAmount       Decimal         @db.Decimal(10, 2)
+  totalAmount     Decimal         @db.Decimal(10, 2)
+
+  invoice         Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id              String          @id @default(uuid())
+  organizationId  String
+  customerId      String
+  invoiceId       String?
+  receiptNumber   String
+  amount          Decimal         @db.Decimal(10, 2)
+  paymentMethod   PaymentMethod   @default(CASH)
+  status          PaymentStatus   @default(SUCCESS)
+  transactionRef   String?
+  gatewayOrderId   String?
+  gatewayPaymentId String?
+  idempotencyKey   String?
+  collectedById    String?
+  paidAt           DateTime        @default(now())
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoice         Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, receiptNumber])
+  @@unique([organizationId, gatewayPaymentId])
+  @@index([organizationId, idempotencyKey])
+  @@index([organizationId, status])
+  @@index([customerId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Router {
+  id                  String          @id @default(uuid())
+  organizationId      String
+  name                String
+  host                String
+  port                Int             @default(8728)
+  username            String
+  encryptedCredential String
+  status              RouterStatus    @default(OFFLINE)
+  lastSeen            DateTime?
+  model               String?
+  rosVersion          String?
+  identity            String?
+  radiusSecret        String?         @default("testing123")
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, host])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("routers")
+}
+
+model AuditLog {
+  id              String          @id @default(uuid())
+  organizationId  String
+  adminUserId     String?
+  action          AuditAction
+  entityType      String
+  entityId        String?
+  details         Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime        @default(now())
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  adminUser       AdminUser?      @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// --------------------------------------------------------
+// FreeRADIUS Native Tables (rlm_sql schema)
+// --------------------------------------------------------
+
+model RadCheck {
+  id        Int       @id @default(autoincrement())
+  username  String    @default("")
+  attribute String    @default("")
+  op        String    @default("==") @db.Char(2)
+  value     String    @default("")
+
+  @@index([username])
+  @@map("radcheck")
+}
+
+model RadReply {
+  id        Int       @id @default(autoincrement())
+  username  String    @default("")
+  attribute String    @default("")
+  op        String    @default("=") @db.Char(2)
+  value     String    @default("")
+
+  @@index([username])
+  @@map("radreply")
+}
+
+model RadUserGroup {
+  id        Int       @id @default(autoincrement())
+  username  String    @default("")
+  groupname String    @default("")
+  priority  Int       @default(1)
+
+  @@index([username])
+  @@map("radusergroup")
+}
+
+model RadGroupCheck {
+  id        Int       @id @default(autoincrement())
+  groupname String    @default("")
+  attribute String    @default("")
+  op        String    @default("==") @db.Char(2)
+  value     String    @default("")
+
+  @@index([groupname])
+  @@map("radgroupcheck")
+}
+
+model RadGroupReply {
+  id        Int       @id @default(autoincrement())
+  groupname String    @default("")
+  attribute String    @default("")
+  op        String    @default("=") @db.Char(2)
+  value     String    @default("")
+
+  @@index([groupname])
+  @@map("radgroupreply")
+}
+
+model RadAcct {
+  radacctid             BigInt    @id @default(autoincrement())
+  acctsessionid         String    @default("")
+  acctuniqueid          String    @unique @default("")
+  username              String    @default("")
+  realm                 String?   @default("")
+  nasipaddress          String    @default("")
+  nasportid             String?   @default("")
+  nasporttype           String?   @default("")
+  acctstarttime         DateTime?
+  acctupdatetime        DateTime?
+  acctstoptime          DateTime?
+  acctinterval          Int?
+  acctsessiontime       BigInt?
+  acctauthentic         String?
+  connectinfo_start     String?
+  connectinfo_stop      String?
+  acctinputoctets       BigInt?
+  acctoutputoctets      BigInt?
+  calledstationid       String?
+  callingstationid      String?
+  acctterminatecause    String?
+  servicetype           String?
+  framedprotocol        String?
+  framedipaddress       String    @default("")
+  framedipv6address     String?
+  framedipv6prefix      String?
+  framedinterfaceid     String?
+  delegatedipv6prefix   String?
+
+  @@index([username])
+  @@index([framedipaddress])
+  @@index([acctsessionid])
+  @@index([acctstarttime])
+  @@index([acctstoptime])
+  @@index([nasipaddress])
+  @@map("radacct")
+}
+
+model Nas {
+  id          Int       @id @default(autoincrement())
+  nasname     String    @unique
+  shortname   String?
+  type        String    @default("other")
+  ports       Int?
+  secret      String
+  server      String?
+  community   String?
+  description String?
+
+  @@map("nas")
+}
+
+model RadPostAuth {
+  id        BigInt    @id @default(autoincrement())
+  username  String    @default("")
+  pass      String    @default("")
+  reply     String    @default("")
+  authdate  DateTime  @default(now())
+
+  @@index([username])
+  @@index([authdate])
+  @@map("radpostauth")
+}

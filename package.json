@@ -1,0 +1,29 @@
+{
+  "name": "ispcrm-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-oriented Multi-Tenant ISP CRM, Billing & Bandwidth Management SaaS",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run --workspaces --parallel dev",
+    "build": "npm run --workspace=@isp-crm/shared build && npm run --workspace=@isp-crm/database build && npm run --workspace=@isp-crm/api build && npm run --workspace=@isp-crm/worker build && npm run --workspace=@isp-crm/web build",
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "lint": "npm run --workspaces --if-present lint",
+    "test": "npm run --workspaces --if-present test",
+    "db:generate": "npm run --workspace=@isp-crm/database generate",
+    "db:push": "npm run --workspace=@isp-crm/database push",
+    "db:seed": "npm run --workspace=@isp-crm/database seed",
+    "db:studio": "npm run --workspace=@isp-crm/database studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,90 @@
+export enum UserRole {
+  ISP_OWNER = 'ISP_OWNER',
+  ISP_ADMIN = 'ISP_ADMIN',
+  BILLING = 'BILLING',
+  SUPPORT = 'SUPPORT',
+  TECHNICIAN = 'TECHNICIAN',
+  READ_ONLY = 'READ_ONLY',
+}
+
+export enum CustomerStatus {
+  LEAD = 'LEAD',
+  PENDING = 'PENDING',
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  EXPIRED = 'EXPIRED',
+  TERMINATED = 'TERMINATED',
+}
+
+export enum SubscriptionStatus {
+  PENDING = 'PENDING',
+  ACTIVE = 'ACTIVE',
+  GRACE = 'GRACE',
+  SUSPENDED = 'SUSPENDED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum InvoiceStatus {
+  DRAFT = 'DRAFT',
+  ISSUED = 'ISSUED',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+  OVERDUE = 'OVERDUE',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum PaymentMethod {
+  CASH = 'CASH',
+  UPI = 'UPI',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  ONLINE_GATEWAY = 'ONLINE_GATEWAY',
+  CHEQUE = 'CHEQUE',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
+}
+
+export enum RouterStatus {
+  ONLINE = 'ONLINE',
+  OFFLINE = 'OFFLINE',
+  UNREACHABLE = 'UNREACHABLE',
+  ERROR = 'ERROR',
+}
+
+export enum PlanStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+}
+
+export enum BillingCycle {
+  MONTHLY = 'MONTHLY',
+  QUARTERLY = 'QUARTERLY',
+  HALF_YEARLY = 'HALF_YEARLY',
+  ANNUAL = 'ANNUAL',
+  CUSTOM = 'CUSTOM',
+}
+
+export enum SpeedUnit {
+  MBPS = 'MBPS',
+  KBPS = 'KBPS',
+  GBPS = 'GBPS',
+}
+
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+  STATUS_CHANGE = 'STATUS_CHANGE',
+  LOGIN = 'LOGIN',
+  LOGOUT = 'LOGOUT',
+  SUSPEND_SUBSCRIBER = 'SUSPEND_SUBSCRIBER',
+  REACTIVATE_SUBSCRIBER = 'REACTIVATE_SUBSCRIBER',
+  COA_DISCONNECT = 'COA_DISCONNECT',
+  COLLECT_PAYMENT = 'COLLECT_PAYMENT',
+  GENERATE_INVOICE = 'GENERATE_INVOICE',
+}
