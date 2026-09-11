@@ -30,6 +30,8 @@ import { RouterDto, SystemResources, ActivePppSession, RouterInterface, Interfac
 export default function RoutersPage() {
   const queryClient = useQueryClient();
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
   const [selectedRouterForResources, setSelectedRouterForResources] = useState<RouterDto | null>(null);
   const [selectedRouterForSessions, setSelectedRouterForSessions] = useState<RouterDto | null>(null);
   const [selectedRouterForInterfaces, setSelectedRouterForInterfaces] = useState<RouterDto | null>(null);
@@ -60,24 +62,34 @@ export default function RoutersPage() {
       username: 'admin',
       password: '',
       radiusSecret: 'testing123',
-      testOnRegister: true,
+      testOnRegister: false,
     },
   });
 
   const registerMutation = useMutation({
     mutationFn: async (data: any) => {
+      setRegisterError(null);
+      const rawPort = Number(data.port);
+      const port = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 8728;
       return apiFetch('/routers', {
         method: 'POST',
         body: JSON.stringify({
           ...data,
-          port: Number(data.port),
+          port,
         }),
       });
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ['routers'] });
       setIsRegisterModalOpen(false);
+      setRegisterError(null);
       reset();
+      const statusNote = res?.status === 'ONLINE' ? 'Online & responsive' : res?.status;
+      setRegisterSuccess(`Router "${res?.name || 'New Router'}" (${res?.host || ''}) registered successfully! Status: ${statusNote}`);
+      setTimeout(() => setRegisterSuccess(null), 8000);
+    },
+    onError: (err: any) => {
+      setRegisterError(err?.message || 'Failed to register router. Please check the credentials and network reachability.');
     },
   });
 
@@ -240,7 +252,10 @@ export default function RoutersPage() {
             Refresh
           </button>
           <button
-            onClick={() => setIsRegisterModalOpen(true)}
+            onClick={() => {
+              setRegisterError(null);
+              setIsRegisterModalOpen(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium shadow-lg shadow-blue-500/25 transition"
           >
             <Plus className="w-4 h-4" />
@@ -248,6 +263,19 @@ export default function RoutersPage() {
           </button>
         </div>
       </div>
+
+      {/* Success Notification Banner */}
+      {registerSuccess && (
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-sm text-emerald-300 flex items-center justify-between shadow-lg shadow-emerald-950/20">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span>{registerSuccess}</span>
+          </div>
+          <button onClick={() => setRegisterSuccess(null)} className="text-emerald-400 hover:text-emerald-200">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -450,12 +478,33 @@ export default function RoutersPage() {
                 Register MikroTik Router
               </h3>
               <button
-                onClick={() => setIsRegisterModalOpen(false)}
+                onClick={() => {
+                  setRegisterError(null);
+                  setIsRegisterModalOpen(false);
+                }}
                 className="text-slate-400 hover:text-slate-200"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Error Alert Banner */}
+            {registerError && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold text-rose-200">Registration Failed</p>
+                  <p className="mt-0.5 text-rose-300/90 leading-relaxed">{registerError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRegisterError(null)}
+                  className="text-rose-400 hover:text-rose-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             <form
               onSubmit={handleSubmit((data) => registerMutation.mutate(data))}
@@ -464,7 +513,7 @@ export default function RoutersPage() {
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">Friendly Name</label>
                 <input
-                  {...register('name', { required: 'Name is required' })}
+                  {...register('name', { required: 'Friendly Name is required' })}
                   placeholder="e.g. North Zone CCR2004 Edge"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                 />
@@ -475,52 +524,64 @@ export default function RoutersPage() {
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-slate-300 mb-1">Host IP / Domain</label>
                   <input
-                    {...register('host', { required: 'Host is required' })}
+                    {...register('host', { required: 'Host IP or domain is required' })}
                     placeholder="192.168.88.1"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                   />
+                  {errors.host && <p className="text-xs text-rose-400 mt-1">{errors.host.message as string}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">Port</label>
                   <input
                     type="number"
-                    {...register('port')}
+                    {...register('port', {
+                      validate: (v) => !v || (Number(v) > 0 && Number(v) <= 65535) || '1-65535',
+                    })}
                     placeholder="8728"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                   />
+                  {errors.port && <p className="text-xs text-rose-400 mt-1">{errors.port.message as string}</p>}
                 </div>
               </div>
+              <p className="text-[11px] text-slate-500 -mt-2">
+                REST API: port 80 (HTTP) or 443 (HTTPS) | WinBox API: port 8728
+              </p>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">API Username</label>
                   <input
-                    {...register('username', { required: 'Username is required' })}
+                    {...register('username', { required: 'API Username is required' })}
                     placeholder="admin"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                   />
+                  {errors.username && <p className="text-xs text-rose-400 mt-1">{errors.username.message as string}</p>}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">API Password</label>
                   <input
                     type="password"
-                    {...register('password', { required: 'Password is required' })}
+                    {...register('password', { required: 'API Password is required' })}
                     placeholder="••••••••"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                   />
+                  {errors.password && <p className="text-xs text-rose-400 mt-1">{errors.password.message as string}</p>}
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">RADIUS Secret (FreeRADIUS NAS)</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">RADIUS Shared Secret (FreeRADIUS NAS)</label>
                 <input
                   {...register('radiusSecret')}
                   placeholder="testing123"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Synchronized to FreeRADIUS NAS table for PPPoE AAA authentication.
+                </p>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
                   id="testOnRegister"
@@ -528,7 +589,7 @@ export default function RoutersPage() {
                   className="w-4 h-4 rounded bg-slate-950 border-slate-800 text-blue-600 focus:ring-blue-500"
                 />
                 <label htmlFor="testOnRegister" className="text-xs text-slate-300 cursor-pointer">
-                  Test connection immediately upon registration
+                  Test connection immediately during registration
                 </label>
               </div>
 
@@ -540,7 +601,10 @@ export default function RoutersPage() {
               <div className="flex justify-end gap-3 pt-3">
                 <button
                   type="button"
-                  onClick={() => setIsRegisterModalOpen(false)}
+                  onClick={() => {
+                    setRegisterError(null);
+                    setIsRegisterModalOpen(false);
+                  }}
                   className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium"
                 >
                   Cancel
@@ -548,8 +612,9 @@ export default function RoutersPage() {
                 <button
                   type="submit"
                   disabled={registerMutation.isPending}
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium disabled:opacity-50 flex items-center gap-2"
                 >
+                  {registerMutation.isPending && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                   {registerMutation.isPending ? 'Registering...' : 'Register Router'}
                 </button>
               </div>

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   UnauthorizedException,
   GatewayTimeoutException,
   BadGatewayException,
@@ -133,18 +134,21 @@ export class MikrotikService {
    * NEVER returns encryptedCredential or passwords.
    */
   async registerRouter(organizationId: string, data: RegisterRouterInput): Promise<RouterDto> {
-    const {
-      name,
-      host,
-      port = 8728,
-      username,
-      password,
-      radiusSecret = 'testing123',
-      testOnRegister = false,
-    } = data;
+    const name = (data.name || '').trim();
+    const host = (data.host || '').trim();
+    const username = (data.username || '').trim();
+    const password = typeof data.password === 'string' ? data.password : '';
+    const radiusSecret = (data.radiusSecret !== undefined && data.radiusSecret !== null) 
+      ? String(data.radiusSecret).trim() 
+      : 'testing123';
+    
+    // Ensure port is always stored as a positive 32-bit integer for Prisma
+    const rawPort = Number(data.port);
+    const parsedPort = Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 8728;
+    const testOnRegister = Boolean(data.testOnRegister);
 
     if (!name || !host || !username || !password) {
-      throw new BadGatewayException('Missing required router registration fields (name, host, username, password)');
+      throw new BadRequestException('Missing required router registration fields: name, host, username, password');
     }
 
     // Tenant-isolated unique check
@@ -158,7 +162,7 @@ export class MikrotikService {
     });
 
     if (existing) {
-      throw new ConflictException(`Router with host '${host}' already exists in your organization`);
+      throw new ConflictException(`Router with host '${host}' already exists in your organization ("${existing.name}")`);
     }
 
     const encryptedCredential = encryptCredential(password);
@@ -177,12 +181,12 @@ export class MikrotikService {
           () =>
             this.mikrotikClient.testConnection({
               host,
-              port,
+              port: parsedPort,
               username,
               password,
-              timeoutMs: 3000,
+              timeoutMs: 2500,
             }),
-          { password },
+          { password, maxRetries: 0 },
         );
 
         if (testRes.success) {
@@ -206,7 +210,7 @@ export class MikrotikService {
           organizationId,
           name,
           host,
-          port,
+          port: parsedPort,
           username,
           encryptedCredential,
           status: initialStatus,
@@ -222,7 +226,7 @@ export class MikrotikService {
       if (radiusSecret) {
         await tx.nas.upsert({
           where: { nasname: host },
-          update: { secret: radiusSecret },
+          update: { secret: radiusSecret, shortname: name },
           create: {
             nasname: host,
             shortname: name,
@@ -236,7 +240,7 @@ export class MikrotikService {
       return created;
     });
 
-    this.logger.log(`Registered router '${router.name}' (${router.host}) for organization ${organizationId}`);
+    this.logger.log(`Registered router '${router.name}' (${router.host}:${router.port}) for organization ${organizationId}`);
     return sanitizeRouter(router);
   }
 
@@ -279,20 +283,50 @@ export class MikrotikService {
     }
 
     const updateData: any = {};
-    if (data.name) updateData.name = data.name;
-    if (data.host) updateData.host = data.host;
-    if (data.port) updateData.port = data.port;
-    if (data.username) updateData.username = data.username;
-    if (data.radiusSecret) updateData.radiusSecret = data.radiusSecret;
+    if (data.name) updateData.name = data.name.trim();
+    if (data.host) updateData.host = data.host.trim();
+    if (data.username) updateData.username = data.username.trim();
     if (data.status) updateData.status = data.status;
+    if (data.radiusSecret !== undefined && data.radiusSecret !== null) {
+      updateData.radiusSecret = String(data.radiusSecret).trim();
+    }
+
+    if (data.port !== undefined && data.port !== null) {
+      const rawPort = Number(data.port);
+      if (Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535) {
+        updateData.port = rawPort;
+      }
+    }
 
     if (data.password) {
       updateData.encryptedCredential = encryptCredential(data.password);
     }
 
-    const updated = await prisma.router.update({
-      where: { id },
-      data: updateData,
+    const updated = await prisma.$transaction(async (tx) => {
+      const res = await tx.router.update({
+        where: { id },
+        data: updateData,
+      });
+
+      if (updateData.radiusSecret !== undefined || updateData.host !== undefined) {
+        const targetHost = updateData.host || router.host;
+        const targetSecret = updateData.radiusSecret || router.radiusSecret || 'testing123';
+        const targetName = updateData.name || router.name;
+
+        await tx.nas.upsert({
+          where: { nasname: targetHost },
+          update: { secret: targetSecret, shortname: targetName },
+          create: {
+            nasname: targetHost,
+            shortname: targetName,
+            type: 'mikrotik',
+            secret: targetSecret,
+            description: `Updated for org ${organizationId}`,
+          },
+        });
+      }
+
+      return res;
     });
 
     return sanitizeRouter(updated);

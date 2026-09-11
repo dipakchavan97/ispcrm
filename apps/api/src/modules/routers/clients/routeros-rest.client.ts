@@ -83,10 +83,14 @@ export class RouterOsRestClient implements MikrotikClient {
       };
     } catch (err: any) {
       const latencyMs = Date.now() - startTime;
+      let msg = sanitizeMessage(err.message || 'Connection failed', [config.password]);
+      if (config.port === 8728) {
+        msg += ' (Note: MikroTik RouterOS v7 REST API uses HTTP port 80 or 443 (the www service). Port 8728 is the binary API service)';
+      }
       return {
         success: false,
         latencyMs,
-        errorMessage: sanitizeMessage(err.message || 'Connection failed', [config.password]),
+        errorMessage: msg,
       };
     }
   }
