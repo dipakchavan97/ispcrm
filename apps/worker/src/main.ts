@@ -1,6 +1,6 @@
 import http from 'node:http';
 import dotenv from 'dotenv';
-import { Worker } from 'bullmq';
+import { Worker, Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { QUEUE_NAMES } from '@isp-crm/shared';
 import { processBillingJob } from './processors/billing.processor';
@@ -23,6 +23,8 @@ const connection = new Redis({
 let billingWorker: Worker | null = null;
 let coaWorker: Worker | null = null;
 let syncWorker: Worker | null = null;
+let billingQueue: Queue | null = null;
+let periodicExpiryTimer: NodeJS.Timeout | null = null;
 
 async function startWorkers() {
   console.log(`[Worker] Connecting to Redis at ${redisHost}:${redisPort}...`);
@@ -30,11 +32,35 @@ async function startWorkers() {
     await connection.connect();
     console.log('[Worker] Redis connection established.');
 
+    billingQueue = new Queue(QUEUE_NAMES.BILLING, { connection });
     billingWorker = new Worker(QUEUE_NAMES.BILLING, processBillingJob, { connection });
     coaWorker = new Worker(QUEUE_NAMES.RADIUS_COA, processRadiusCoaJob, { connection });
     syncWorker = new Worker(QUEUE_NAMES.ROUTER_SYNC, processRouterSyncJob, { connection });
 
     console.log('[Worker] All BullMQ workers successfully registered and listening.');
+
+    // Periodic Subscription Expiry Scanner
+    const runPeriodicExpiryScan = async () => {
+      try {
+        const slot = Math.floor(Date.now() / 60000);
+        await billingQueue?.add(
+          'EXPIRY_CHECK',
+          { type: 'EXPIRY_CHECK' },
+          {
+            jobId: `expiry-scan-${slot}`,
+            removeOnComplete: 100,
+            removeOnFail: 200,
+          },
+        );
+      } catch (err: any) {
+        console.warn(`[Worker] Failed to enqueue periodic expiry scan: ${err.message}`);
+      }
+    };
+
+    // Initial scan after 3s, then every 60s
+    setTimeout(runPeriodicExpiryScan, 3000);
+    periodicExpiryTimer = setInterval(runPeriodicExpiryScan, 60000);
+    console.log('[Worker] Periodic subscription expiry scheduler active (interval: 60s).');
   } catch (err: any) {
     console.warn(`[Worker] Notice: Redis not yet available (${err.message}). Retrying in background...`);
   }
@@ -67,6 +93,8 @@ startWorkers();
 async function shutdown() {
   console.log('[Worker] Graceful shutdown initiated...');
   server.close();
+  if (periodicExpiryTimer) clearInterval(periodicExpiryTimer);
+  if (billingQueue) await billingQueue.close();
   if (billingWorker) await billingWorker.close();
   if (coaWorker) await coaWorker.close();
   if (syncWorker) await syncWorker.close();

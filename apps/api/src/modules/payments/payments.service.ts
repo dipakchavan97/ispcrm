@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { prisma } from '@isp-crm/database';
 import {
@@ -17,9 +18,14 @@ import {
   DEFAULT_TIMEZONE,
   translateNetworkPolicyToRadius,
   buildNetworkPolicyFromPlan,
+  CoaAction,
+  CoaRequestType,
+  NotificationEmitter,
+  NotificationEventType,
 } from '@isp-crm/shared';
 import { Decimal } from 'decimal.js';
 import { MockPaymentProvider } from './providers/mock-payment.provider';
+import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
 export interface PaymentListFilter {
   status?: string;
@@ -33,7 +39,10 @@ export interface PaymentListFilter {
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly paymentProvider: MockPaymentProvider) {}
+  constructor(
+    private readonly paymentProvider: MockPaymentProvider,
+    @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
+  ) {}
 
   /**
    * Helper to verify and sanitize adminUserId
@@ -223,7 +232,7 @@ export class PaymentsService {
 
     // Atomic transaction for database consistency and concurrency safety
     try {
-      return await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
       // 1. IDEMPOTENCY CHECK:
       // If a successful payment with this gatewayPaymentId or idempotencyKey already exists,
       // return it immediately without double charging or duplicate renewals!
@@ -513,6 +522,28 @@ export class PaymentsService {
         subscription: updatedSubscription,
       };
     });
+
+    if (this.coaQueueService && !result.isDuplicate && invoiceId) {
+      const inv = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+        include: { customer: true, subscription: true },
+      });
+      if (inv?.customer?.username) {
+        this.coaQueueService
+          .queueCoaJob({
+            organizationId,
+            customerId: inv.customerId,
+            subscriptionId: inv.subscriptionId || undefined,
+            username: inv.customer.username,
+            action: CoaAction.REACTIVATE,
+            requestType: CoaRequestType.COA,
+            reason: `Automated reactivation on online payment ${gatewayPaymentId}`,
+          })
+          .catch((err) => console.warn(`[PaymentsService] CoA enqueue error: ${err.message}`));
+      }
+    }
+
+    return result;
     } catch (err: any) {
       if (err?.code === 'P2002' || err?.message?.includes('Unique constraint')) {
         const existing = await prisma.payment.findFirst({
@@ -670,7 +701,7 @@ export class PaymentsService {
 
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const finalResult = await prisma.$transaction(async (tx) => {
       let settlementResult: any = null;
 
       if (invoiceId) {
@@ -802,6 +833,21 @@ export class PaymentsService {
         settlement: settlementResult,
       };
     });
+
+    if (this.coaQueueService && customer.username) {
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: customer.id,
+          username: customer.username,
+          action: CoaAction.REACTIVATE,
+          requestType: CoaRequestType.COA,
+          reason: `Reactivated subscriber upon payment collection`,
+        })
+        .catch((err) => console.warn(`[PaymentsService] CoA reactivation enqueue notice: ${err.message}`));
+    }
+
+    return finalResult;
   }
 
   /**

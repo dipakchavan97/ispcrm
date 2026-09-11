@@ -9,3 +9,4 @@ export * from './billing-math';
 export * from './payment-provider.interface';
 export * from './mikrotik.interface';
 export * from './radius-coa';
+export * from './subscription-automation';

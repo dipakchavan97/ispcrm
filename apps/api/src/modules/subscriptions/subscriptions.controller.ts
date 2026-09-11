@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
+import { SubscriptionAutomationService } from './subscription-automation.service';
 import { CurrentOrgId } from '../../common/decorators/current-org.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -17,7 +18,17 @@ import { UserRole, SubscriptionStatus } from '@isp-crm/shared';
 @ApiBearerAuth()
 @Controller('subscriptions')
 export class SubscriptionsController {
-  constructor(private readonly subscriptionsService: SubscriptionsService) {}
+  constructor(
+    private readonly subscriptionsService: SubscriptionsService,
+    private readonly automationService: SubscriptionAutomationService,
+  ) {}
+
+  @Post('automation/evaluate-expiry')
+  @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.BILLING)
+  @ApiOperation({ summary: 'Trigger On-Demand Subscription Expiry Evaluation Automation' })
+  async evaluateExpiry(@CurrentOrgId() organizationId: string) {
+    return this.automationService.evaluateExpiry(organizationId);
+  }
 
   @Get()
   @Roles(
