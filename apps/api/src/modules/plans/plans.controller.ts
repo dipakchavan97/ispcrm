@@ -58,6 +58,20 @@ export class PlansController {
     return this.plansService.listPolicies(organizationId);
   }
 
+  @Post('simulate-policy')
+  @Roles(
+    UserRole.ISP_OWNER,
+    UserRole.ISP_ADMIN,
+    UserRole.BILLING,
+    UserRole.SUPPORT,
+    UserRole.TECHNICIAN,
+    UserRole.READ_ONLY,
+  )
+  @ApiOperation({ summary: 'Simulate 3-Tier Network Policy (Plan -> NetworkPolicy -> RadiusAttributes)' })
+  async simulatePolicy(@Body() body: any) {
+    return this.plansService.simulatePolicy(body);
+  }
+
   @Get(':id')
   @Roles(
     UserRole.ISP_OWNER,

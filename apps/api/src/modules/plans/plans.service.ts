@@ -7,6 +7,7 @@ import {
   AuditAction,
   buildNetworkPolicyFromPlan,
   translateNetworkPolicyToRadius,
+  NetworkPolicyGenerator,
 } from '@isp-crm/shared';
 
 export interface PlanListFilter {
@@ -359,11 +360,18 @@ export class PlansService {
   }
 
   /**
+   * Generates a 3-tier Network Policy abstraction from a Plan specification:
+   * Plan -> NetworkPolicy -> RadiusAttributes
+   */
+  simulatePolicy(planInput: any) {
+    return NetworkPolicyGenerator.generate(planInput);
+  }
+
+  /**
    * Format and attach vendor-neutral network policy object and RADIUS translation
    */
   private formatPlan(plan: any) {
-    const policy = buildNetworkPolicyFromPlan(plan);
-    const radiusAttributes = translateNetworkPolicyToRadius(policy);
+    const { networkPolicy, radiusAttributes } = NetworkPolicyGenerator.generate(plan);
 
     return {
       id: plan.id,
@@ -392,7 +400,7 @@ export class PlansService {
       createdAt: plan.createdAt,
       updatedAt: plan.updatedAt,
       // Vendor-neutral Network Policy Object
-      networkPolicy: policy,
+      networkPolicy,
       // RADIUS / MikroTik Compiled Translation
       radiusAttributes,
       rateLimitString: radiusAttributes['Mikrotik-Rate-Limit'],
