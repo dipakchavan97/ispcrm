@@ -86,8 +86,17 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
         orderBy: { acctstarttime: 'desc' },
       });
 
+      const router = await prisma.router.findFirst({
+        where: { organizationId: data.organizationId },
+      });
+      if (router) {
+        if (!activeSession?.nasipaddress) nasIp = router.host;
+        if (router.port) nasPort = router.port;
+        if (router.radiusSecret) secret = router.radiusSecret;
+      }
+
       if (activeSession) {
-        nasIp = activeSession.nasipaddress || '127.0.0.1';
+        if (activeSession.nasipaddress) nasIp = activeSession.nasipaddress;
         sessionId = activeSession.acctsessionid;
         framedIp = activeSession.framedipaddress;
 
@@ -97,15 +106,6 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
         });
         if (nasRecord?.secret) {
           secret = nasRecord.secret;
-        }
-      } else {
-        // Fallback: check organization's configured routers
-        const router = await prisma.router.findFirst({
-          where: { organizationId: data.organizationId },
-        });
-        if (router) {
-          nasIp = router.host;
-          secret = router.radiusSecret || 'testing123';
         }
       }
     } catch (discoveryErr: any) {
