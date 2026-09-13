@@ -5,6 +5,9 @@ import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 
 import { QueryProvider } from '../lib/query-provider';
+import { ToastProvider } from '../components/Toast';
+
+import { AppShell } from '../components/AppShell';
 
 export const metadata: Metadata = {
   title: 'ISP CRM & Billing SaaS',
@@ -18,13 +21,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-[#0b1329] text-slate-100 flex min-h-screen">
+      <body className="bg-[#0b1329] text-slate-100 min-h-screen">
         <QueryProvider>
-          <Sidebar />
-          <div className="flex-1 flex flex-col min-w-0">
-            <Header />
-            <main className="flex-1 p-6 overflow-y-auto">{children}</main>
-          </div>
+          <ToastProvider>
+            <AppShell>{children}</AppShell>
+          </ToastProvider>
         </QueryProvider>
       </body>
     </html>

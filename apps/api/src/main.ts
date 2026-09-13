@@ -10,9 +10,48 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
+
+  // Security: Restrict CORS origins strictly
+  const allowedOriginsEnv = process.env.CORS_ALLOWED_ORIGINS;
+  const defaultAllowedOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:4000',
+    'http://127.0.0.1:4000',
+  ];
+  const allowedOrigins = allowedOriginsEnv
+    ? allowedOriginsEnv.split(',').map((o) => o.trim())
+    : defaultAllowedOrigins;
+
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile clients, curl, server-to-server)
+      if (!origin) {
+        return callback(null, true);
+      }
+      if (
+        allowedOrigins.includes(origin) ||
+        (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin))
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS policy violation: Origin '${origin}' is not permitted by Access-Control-Allow-Origin.`));
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'X-Idempotency-Key',
+      'X-Webhook-Signature',
+    ],
+    exposedHeaders: [
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+      'Retry-After',
+    ],
   });
 
   app.useGlobalPipes(
@@ -22,6 +61,21 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // Production Security Sanity Checks
+  if (process.env.NODE_ENV === 'production') {
+    const defaultSecret = 'super-secret-jwt-key-change-in-production';
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === defaultSecret || process.env.JWT_SECRET.length < 32) {
+      logger.warn(
+        'SECURITY ALERT: Running in production with default or weak JWT_SECRET! Please configure a high-entropy secret (>=32 chars).',
+      );
+    }
+    if (!process.env.ROUTER_ENCRYPTION_KEY || process.env.ROUTER_ENCRYPTION_KEY.length < 32) {
+      logger.warn(
+        'SECURITY ALERT: ROUTER_ENCRYPTION_KEY is not set or less than 32 characters! Set a dedicated 256-bit encryption key.',
+      );
+    }
+  }
 
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new TransformInterceptor());

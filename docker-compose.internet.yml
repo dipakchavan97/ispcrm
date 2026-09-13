@@ -1,0 +1,288 @@
+# ==============================================================================
+# ISPCRM PRODUCTION DOCKER COMPOSE — SECURE INTERNET HOSTING (PC / VPS)
+# Target Domain: cloudsetup.in (app.cloudsetup.in & vpn.cloudsetup.in)
+# ==============================================================================
+# Public Port Surface: TCP 443 ONLY (plus optional TCP 80 for ACME challenge)
+#
+# Key Architecture Principles:
+# 1. Zero Direct Host Exposure: PostgreSQL (5432), Redis (6379), Worker (4001),
+#    Web (3000), and API (4000) have NO published host ports.
+# 2. Same-Origin Web/API: All web traffic (https://app.cloudsetup.in/) and API
+#    traffic (https://app.cloudsetup.in/api/) flow through the reverse proxy on TCP 443.
+# 3. SSTP VPN: vpn.cloudsetup.in:443 passes directly through Layer-4 SNI preread
+#    to ispcrm-sstp (accel-pppd), which terminates TLS and negotiates MS-SSTP.
+# 4. SSTP Management CLI: Port 2001 is bound strictly to local loopback (127.0.0.1).
+# 5. FreeRADIUS: UDP 1812/1813/3799 are private to the SSTP VPN and internal Docker nets.
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Edge Reverse Proxy & SNI Demultiplexer (Nginx)
+  # ----------------------------------------------------------------------------
+  proxy:
+    build:
+      context: ./infrastructure/reverse-proxy
+      dockerfile: Dockerfile
+    container_name: ispcrm-proxy
+    restart: always
+    ports:
+      - "443:443"      # Public HTTPS (app.cloudsetup.in) & SSTP (vpn.cloudsetup.in)
+    volumes:
+      - ./infrastructure/reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      - ${LETSENCRYPT_WEB_CERT_DIR:-./certs/app}:/etc/ssl/certs/app:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      sstp:
+        condition: service_started
+    networks:
+      - ispcrm-frontend-net
+      - ispcrm-vpn-net
+
+  # ----------------------------------------------------------------------------
+  # 2. PostgreSQL 16 (Relational Database & FreeRADIUS backend)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: ispcrm-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ispcrm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/freeradius/sql/postgresql/schema.sql:/docker-entrypoint-initdb.d/10-freeradius.sql:ro
+    # SECURITY: Port 5432 has NO host port mapping. Only internal containers on
+    # ispcrm-backend-net can connect.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ispcrm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - ispcrm-backend-net
+
+  # ----------------------------------------------------------------------------
+  # 3. Redis 7 (BullMQ Queues, Cache & Session Store)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ispcrm-redis
+    restart: always
+    command: >
+      sh -c 'if [ -n "$${REDIS_PASSWORD}" ]; then
+        redis-server --requirepass "$${REDIS_PASSWORD}" --appendonly yes;
+      else
+        redis-server --appendonly yes;
+      fi'
+    volumes:
+      - redis_data:/data
+    # SECURITY: Port 6379 has NO host port mapping.
+    expose:
+      - "6379"
+    healthcheck:
+      test: >
+        sh -c 'if [ -n "$${REDIS_PASSWORD}" ]; then
+          redis-cli -a "$${REDIS_PASSWORD}" ping;
+        else
+          redis-cli ping;
+        fi'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ispcrm-backend-net
+
+  # ----------------------------------------------------------------------------
+  # 4. FreeRADIUS 3.x (AAA Server Engine)
+  # ----------------------------------------------------------------------------
+  freeradius:
+    build:
+      context: ./infrastructure/freeradius
+      dockerfile: Dockerfile
+    container_name: ispcrm-freeradius
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # SECURITY: FreeRADIUS UDP ports are NOT exposed to the public Internet.
+    # MikroTik routers communicate with FreeRADIUS inside the SSTP VPN tunnel (10.200.0.1).
+    expose:
+      - "1812/udp"
+      - "1813/udp"
+      - "3799/udp"
+    ports:
+      # Strictly bound to local loopback (127.0.0.1) for admin diagnostics only
+      - "127.0.0.1:1812:1812/udp"
+      - "127.0.0.1:1813:1813/udp"
+    networks:
+      - ispcrm-backend-net
+      - ispcrm-vpn-net
+
+  # ----------------------------------------------------------------------------
+  # 5. Backend REST API (NestJS Modular Monolith)
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ispcrm-api
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ispcrm}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      ROUTER_ENCRYPTION_KEY: super-secret-jwt-key-change-in-production
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://app.cloudsetup.in}
+      SSTP_SERVER_HOST: ${SSTP_SERVER_HOST:-vpn.cloudsetup.in}
+      SSTP_SERVER_PORT: ${SSTP_SERVER_PORT:-443}
+      SSTP_SERVICE_HOST: sstp
+      SSTP_CHAP_SECRETS_PATH: /etc/ppp/chap-secrets
+      SSTP_CA_CERT_PATH: /etc/ssl/sstp/fullchain.pem
+    # SECURITY: Raw HTTP port 4000 is NOT exposed to public host.
+    # Ingress is routed through the TLS reverse proxy on https://app.cloudsetup.in/api/.
+    expose:
+      - "4000"
+    volumes:
+      - sstp_secrets:/etc/ppp
+      - ${LETSENCRYPT_VPN_CERT_DIR:-./certs/sstp}:/etc/ssl/sstp:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - ispcrm-frontend-net
+      - ispcrm-backend-net
+      - ispcrm-vpn-net
+
+  # ----------------------------------------------------------------------------
+  # 6. Background Async Worker (BullMQ)
+  # ----------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: ispcrm-worker
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ispcrm}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      WORKER_PORT: 4001
+      SSTP_SERVICE_HOST: sstp
+    # SECURITY: Worker port 4001 is internal only for healthcheck
+    expose:
+      - "4001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - ispcrm-backend-net
+      - ispcrm-vpn-net
+
+  # ----------------------------------------------------------------------------
+  # 7. Web Admin Portal (Next.js 14)
+  # ----------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: ispcrm-web
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: /api
+    # SECURITY: Port 3000 is strictly internal to ispcrm-frontend-net
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - ispcrm-frontend-net
+
+  # ----------------------------------------------------------------------------
+  # 8. SSTP VPN Concentrator (accel-pppd)
+  # ----------------------------------------------------------------------------
+  sstp:
+    build:
+      context: ./infrastructure/sstp
+      dockerfile: Dockerfile
+    container_name: ispcrm-sstp
+    restart: always
+    entrypoint: ["/entrypoint.prod.sh"]
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    # SECURITY: Port 443 is reached via the SNI reverse proxy on ispcrm-vpn-net.
+    # Management CLI port 2001 is strictly locked to local host loopback (127.0.0.1).
+    expose:
+      - "443"
+    ports:
+      - "127.0.0.1:2001:2001"
+    volumes:
+      - sstp_secrets:/etc/ppp
+      - ${LETSENCRYPT_VPN_CERT_DIR:-./certs/sstp}:/etc/ssl/sstp:ro
+    networks:
+      - ispcrm-vpn-net
+
+networks:
+  # Tier 1: Ingress & Web Layer
+  ispcrm-frontend-net:
+    driver: bridge
+
+  # Tier 2: Storage & AAA Layer (Shielded from Ingress)
+  ispcrm-backend-net:
+    driver: bridge
+
+  # Tier 3: Network Gateway Layer (SSTP, API, FreeRADIUS)
+  ispcrm-vpn-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  sstp_secrets:
+  certbot_conf:
+  certbot_www:

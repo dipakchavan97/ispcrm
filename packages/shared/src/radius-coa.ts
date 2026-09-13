@@ -118,7 +118,11 @@ export function encodeRadiusAttribute(type: number, value: Buffer | string | num
 }
 
 export function encodeIpAttribute(type: number, ipStr: string): Buffer {
-  const parts = ipStr.split('.').map(Number);
+  const cleanIp = (ipStr || '').split('/')[0].trim();
+  const parts = cleanIp.split('.').map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((n) => isNaN(n) || n < 0 || n > 255)) {
+    throw new Error(`Invalid IPv4 address format for RADIUS attribute ${type}: '${ipStr}'`);
+  }
   const valBuf = Buffer.from(parts);
   const length = 2 + valBuf.length;
   const attrBuf = Buffer.alloc(length);
@@ -147,7 +151,7 @@ export function encodeMikrotikVsa(subType: number, value: string): Buffer {
 }
 
 /**
- * Build RFC 3576 Packet with Message-Authenticator (HMAC-MD5)
+ * Build RFC 3576 / RFC 5176 Packet with Request Authenticator & Message-Authenticator (HMAC-MD5)
  */
 export function buildCoaOrDisconnectPacket(options: {
   code: number;
@@ -160,7 +164,8 @@ export function buildCoaOrDisconnectPacket(options: {
   nasIp?: string;
   authenticator?: Buffer;
 }): { packet: Buffer; authenticator: Buffer } {
-  const authenticator = options.authenticator || crypto.randomBytes(16);
+  const isDisconnect = options.code === RADIUS_COA_CODE.DISCONNECT_REQUEST;
+
   const rawAttrs: Buffer[] = [
     encodeRadiusAttribute(RADIUS_ATTR_TYPE.USER_NAME, options.username),
   ];
@@ -171,7 +176,8 @@ export function buildCoaOrDisconnectPacket(options: {
   if (options.sessionId) {
     rawAttrs.push(encodeRadiusAttribute(RADIUS_ATTR_TYPE.ACCT_SESSION_ID, options.sessionId));
   }
-  if (options.nasIp) {
+  // For DISCONNECT_REQUEST packets: Omit NAS-IP-Address (Type 4) per RouterOS 6 compatibility
+  if (options.nasIp && !isDisconnect) {
     rawAttrs.push(encodeIpAttribute(RADIUS_ATTR_TYPE.NAS_IP_ADDRESS, options.nasIp));
   }
   if (options.rateLimit) {
@@ -183,11 +189,16 @@ export function buildCoaOrDisconnectPacket(options: {
   timestampBuf.writeUInt32BE(Math.floor(Date.now() / 1000), 0);
   rawAttrs.push(encodeRadiusAttribute(RADIUS_ATTR_TYPE.EVENT_TIMESTAMP, timestampBuf));
 
-  // Placeholder for Message-Authenticator (Type 80, length 18: 16-byte zero hash)
-  const msgAuthPlaceholder = Buffer.alloc(18);
-  msgAuthPlaceholder[0] = RADIUS_ATTR_TYPE.MESSAGE_AUTHENTICATOR;
-  msgAuthPlaceholder[1] = 18;
-  rawAttrs.push(msgAuthPlaceholder);
+  // For DISCONNECT_REQUEST packets: Omit Message-Authenticator (Type 80) per RouterOS 6 compatibility
+  // Keep Message-Authenticator for CoA-Request packets
+  if (!isDisconnect) {
+    // Placeholder for Message-Authenticator (Type 80, length 18: 16-byte zero hash)
+    const msgAuthPlaceholder = Buffer.alloc(18);
+    msgAuthPlaceholder[0] = RADIUS_ATTR_TYPE.MESSAGE_AUTHENTICATOR;
+    msgAuthPlaceholder[1] = 18;
+    msgAuthPlaceholder.fill(0, 2, 18);
+    rawAttrs.push(msgAuthPlaceholder);
+  }
 
   const attrsConcat = Buffer.concat(rawAttrs);
   const totalLength = 20 + attrsConcat.length;
@@ -196,19 +207,37 @@ export function buildCoaOrDisconnectPacket(options: {
   packet[0] = options.code;
   packet[1] = options.identifier;
   packet.writeUInt16BE(totalLength, 2);
-  authenticator.copy(packet, 4);
+
+  // 1. Header Request Authenticator initialized to 16 zero octets per RFC 3576 Section 2.2
+  packet.fill(0, 4, 20);
   attrsConcat.copy(packet, 20);
 
-  // Calculate HMAC-MD5 Message-Authenticator over the full packet with shared secret
-  const hmac = crypto.createHmac('md5', Buffer.from(options.secret, 'utf8'));
-  hmac.update(packet);
-  const messageAuthDigest = hmac.digest();
+  // 2. Calculate RFC 3576 Request Authenticator = MD5(Code + Identifier + Length + 16 zero octets + Attributes + Secret)
+  let requestAuthenticator: Buffer;
+  if (options.authenticator) {
+    requestAuthenticator = options.authenticator;
+  } else {
+    const reqAuthHash = crypto.createHash('md5');
+    reqAuthHash.update(packet);
+    reqAuthHash.update(Buffer.from(options.secret, 'utf8'));
+    requestAuthenticator = reqAuthHash.digest();
+  }
 
-  // Find Type 80 in packet and inject the digest
-  const msgAuthOffset = totalLength - 16;
-  messageAuthDigest.copy(packet, msgAuthOffset);
+  // 3. Write calculated Request Authenticator into packet header (bytes 4-19)
+  requestAuthenticator.copy(packet, 4);
 
-  return { packet, authenticator };
+  // 4. Calculate HMAC-MD5 Message-Authenticator if present (for CoA-Request)
+  if (!isDisconnect) {
+    const hmac = crypto.createHmac('md5', Buffer.from(options.secret, 'utf8'));
+    hmac.update(packet);
+    const messageAuthDigest = hmac.digest();
+
+    // Inject digest into Message-Authenticator (Type 80 is the final attribute in attrsConcat)
+    const msgAuthOffset = totalLength - 16;
+    messageAuthDigest.copy(packet, msgAuthOffset);
+  }
+
+  return { packet, authenticator: requestAuthenticator };
 }
 
 /**
@@ -625,4 +654,28 @@ export class MockNAS {
   clearHistory() {
     this.receivedPackets = [];
   }
+}
+
+/**
+ * Resolves candidate RADIUS usernames for a subscriber account.
+ * Handles realm normalization: e.g. for "dipak123", returns ["dipak123", "dipak123@ispcrm"].
+ * If username already has "@realm", returns [clean, base].
+ */
+export function getRadiusUsernameCandidates(username: string, realm: string = 'ispcrm'): string[] {
+  if (!username) return [];
+  const clean = username.trim();
+  if (clean.includes('@')) {
+    const base = clean.split('@')[0];
+    return [clean, base];
+  }
+  return [clean, `${clean}@${realm}`];
+}
+
+/**
+ * Normalizes username to the physical RADIUS username with realm.
+ */
+export function toPhysicalRadiusUsername(username: string, realm: string = 'ispcrm'): string {
+  if (!username) return '';
+  const clean = username.trim();
+  return clean.includes('@') ? clean : `${clean}@${realm}`;
 }

@@ -9,22 +9,26 @@ import {
   Wifi,
   CreditCard,
   Receipt,
+  IndianRupee,
   Router,
-  Radio,
-  History,
+  Activity,
+  LifeBuoy,
+  FileBarChart,
   Settings,
   ShieldCheck,
 } from 'lucide-react';
 
 const navigationItems = [
-  { name: 'Dashboard', icon: LayoutDashboard, href: '/' },
+  { name: 'Dashboard', icon: LayoutDashboard, href: '/dashboard', aliases: ['/'] },
   { name: 'Customers', icon: Users, href: '/customers' },
-  { name: 'Internet Plans', icon: Wifi, href: '/plans' },
+  { name: 'Plans', icon: Wifi, href: '/plans' },
   { name: 'Subscriptions', icon: CreditCard, href: '/subscriptions' },
-  { name: 'Invoices (GST)', icon: Receipt, href: '/invoices' },
-  { name: 'MikroTik Routers', icon: Router, href: '/routers' },
-  { name: 'RADIUS Sessions', icon: Radio, href: '/radius' },
-  { name: 'Audit Logs', icon: History, href: '/audit' },
+  { name: 'Invoices', icon: Receipt, href: '/invoices' },
+  { name: 'Payments', icon: IndianRupee, href: '/payments' },
+  { name: 'Routers', icon: Router, href: '/routers' },
+  { name: 'Network', icon: Activity, href: '/network' },
+  { name: 'Tickets', icon: LifeBuoy, href: '/tickets' },
+  { name: 'Reports', icon: FileBarChart, href: '/reports' },
   { name: 'Settings', icon: Settings, href: '/settings' },
 ];
 
@@ -40,7 +44,7 @@ export function Sidebar() {
         </div>
         <div>
           <div className="font-semibold text-slate-100 text-sm tracking-tight">SpeedNet CRM</div>
-          <div className="text-xs text-blue-400 font-mono">Multi-Tenant SaaS</div>
+          <div className="text-xs text-blue-400 font-mono">Carrier Platform</div>
         </div>
       </div>
 
@@ -48,7 +52,7 @@ export function Sidebar() {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navigationItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || item.aliases?.includes(pathname);
 
           return (
             <Link

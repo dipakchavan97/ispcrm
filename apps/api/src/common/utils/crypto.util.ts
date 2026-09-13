@@ -74,6 +74,8 @@ export function sanitizeRouter<T extends Record<string, any>>(router: T): Router
   delete sanitized.encryptedCredential;
   delete sanitized.password;
   delete sanitized.apiPassword;
+  delete sanitized.encryptedVpnSecret;
+  delete sanitized.vpnPassword;
   return sanitized as unknown as RouterDto;
 }
 

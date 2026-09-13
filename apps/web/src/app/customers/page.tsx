@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import {
@@ -187,6 +188,12 @@ export default function CustomersPage() {
   const { data: plans = [] } = useQuery<Plan[]>({
     queryKey: ['plans'],
     queryFn: () => apiFetch<Plan[]>('/plans'),
+  });
+
+  // 4. Fetch MikroTik Routers for network provisioning
+  const { data: routers = [] } = useQuery<{ id: string; name: string; host: string }[]>({
+    queryKey: ['routers-for-customers'],
+    queryFn: () => apiFetch('/routers'),
   });
 
   // Forms
@@ -505,12 +512,12 @@ export default function CustomersPage() {
                     <tr key={c.id} className="hover:bg-slate-800/30 transition-colors group">
                       {/* Name & Code */}
                       <td className="px-4 py-3.5">
-                        <div
-                          onClick={() => setSelectedCustomerId(c.id)}
-                          className="font-semibold text-slate-100 hover:text-blue-400 cursor-pointer flex items-center gap-1.5"
+                        <Link
+                          href={`/customers/${c.id}`}
+                          className="font-semibold text-slate-100 hover:text-blue-400 flex items-center gap-1.5 transition-colors"
                         >
                           <span>{c.name}</span>
-                        </div>
+                        </Link>
                         <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
                           <span className="font-mono text-blue-400/90">{c.customerCode}</span>
                           <span>•</span>
@@ -570,13 +577,13 @@ export default function CustomersPage() {
                       <td className="px-4 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* View Details */}
-                          <button
-                            onClick={() => setSelectedCustomerId(c.id)}
+                          <Link
+                            href={`/customers/${c.id}`}
                             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all"
                             title="View Customer Details & Audit History"
                           >
                             <Eye className="h-3.5 w-3.5" />
-                          </button>
+                          </Link>
 
                           {/* Edit Customer */}
                           <button
@@ -871,34 +878,25 @@ export default function CustomersPage() {
               {/* PPPoE Credentials & Provisioning */}
               <div className="pt-3 border-t border-slate-800">
                 <h3 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-3">
-                  3. Network Credentials & RADIUS Provisioning
+                  3. Network Provisioning, Router & PPPoE Credentials
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">PPPoE Username *</label>
-                    <input
-                      {...createForm.register('username', { required: 'PPPoE Username is required' })}
-                      type="text"
-                      placeholder="e.g. ramesh_fiber"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
-                    />
-                    {createForm.formState.errors.username && (
-                      <p className="text-[10px] text-rose-400 mt-1">{createForm.formState.errors.username.message}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">PPPoE Password *</label>
-                    <input
-                      {...createForm.register('pppoePassword', { required: 'Password is required' })}
-                      type="password"
-                      placeholder="••••••••"
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Target MikroTik Router</label>
+                    <select
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                    />
+                    >
+                      <option value="">Default BNG Gateway</option>
+                      {routers.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name} ({r.host})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">Internet Plan</label>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">Internet Plan *</label>
                     <select
                       {...createForm.register('planId')}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
@@ -918,6 +916,42 @@ export default function CustomersPage() {
                       {...createForm.register('staticIp')}
                       type="text"
                       placeholder="e.g. 100.64.1.55"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-300 mb-1">PPPoE Username *</label>
+                    <input
+                      {...createForm.register('username', { required: 'PPPoE Username is required' })}
+                      type="text"
+                      placeholder="e.g. ramesh_fiber"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    />
+                    {createForm.formState.errors.username && (
+                      <p className="text-[10px] text-rose-400 mt-1">{createForm.formState.errors.username.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-slate-300">PPPoE Password *</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const generated = Math.random().toString(36).slice(-8);
+                          createForm.setValue('pppoePassword', generated);
+                          showNotification(`Generated PPPoE password: ${generated}`);
+                        }}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
+                      >
+                        Auto-Generate
+                      </button>
+                    </div>
+                    <input
+                      {...createForm.register('pppoePassword', { required: 'Password is required' })}
+                      type="text"
+                      placeholder="••••••••"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                     />
                   </div>
@@ -984,9 +1018,13 @@ export default function CustomersPage() {
             </div>
 
             <form
-              onSubmit={editForm.handleSubmit((formData) =>
-                editMutation.mutate({ id: editingCustomer.id, data: formData }),
-              )}
+              onSubmit={editForm.handleSubmit((formData) => {
+                const payload = { ...formData };
+                if (typeof payload.pppoePassword === 'string' && !payload.pppoePassword.trim()) {
+                  delete payload.pppoePassword;
+                }
+                editMutation.mutate({ id: editingCustomer.id, data: payload });
+              })}
               className="p-6 space-y-5"
             >
               {/* Profile Details */}

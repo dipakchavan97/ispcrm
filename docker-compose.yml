@@ -70,6 +70,8 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: ispcrm-api
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,9 +84,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: super-secret-jwt-key-change-in-production
-      USE_MOCK_MIKROTIK: "true"
+      USE_MOCK_MIKROTIK: "${USE_MOCK_MIKROTIK:-auto}"
     ports:
       - "4000:4000"
+    volumes:
+      - sstp_secrets:/etc/ppp
+      - sstp_certs:/etc/ssl/sstp:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
       interval: 10s
@@ -140,7 +145,7 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      NEXT_PUBLIC_API_URL: /api
     ports:
       - "3000:3000"
     healthcheck:
@@ -152,6 +157,27 @@ services:
     networks:
       - ispcrm-net
 
+  # --------------------------------------------------------
+  # 7. SSTP VPN Concentrator (accel-pppd)
+  # --------------------------------------------------------
+  sstp:
+    build:
+      context: ./infrastructure/sstp
+      dockerfile: Dockerfile
+    container_name: ispcrm-sstp
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "443:443"
+      - "2001:2001"
+    volumes:
+      - sstp_secrets:/etc/ppp
+      - sstp_certs:/etc/ssl/sstp
+    networks:
+      - ispcrm-net
+
 networks:
   ispcrm-net:
     driver: bridge
@@ -159,3 +185,5 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  sstp_secrets:
+  sstp_certs:

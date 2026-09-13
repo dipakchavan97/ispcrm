@@ -23,9 +23,23 @@ import {
   ArrowDownUp,
   X,
   Radio,
+  FileCode,
+  Copy,
+  Check,
+  ShieldCheck,
+  Globe,
+  Terminal,
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
-import { RouterDto, SystemResources, ActivePppSession, RouterInterface, InterfaceTraffic } from '@isp-crm/shared';
+import {
+  RouterDto,
+  SystemResources,
+  ActivePppSession,
+  RouterInterface,
+  InterfaceTraffic,
+  RouterConnectionMethod,
+  RouterApiMethod,
+} from '@isp-crm/shared';
 
 export default function RoutersPage() {
   const queryClient = useQueryClient();
@@ -35,6 +49,9 @@ export default function RoutersPage() {
   const [selectedRouterForResources, setSelectedRouterForResources] = useState<RouterDto | null>(null);
   const [selectedRouterForSessions, setSelectedRouterForSessions] = useState<RouterDto | null>(null);
   const [selectedRouterForInterfaces, setSelectedRouterForInterfaces] = useState<RouterDto | null>(null);
+  const [selectedRouterForScript, setSelectedRouterForScript] = useState<RouterDto | null>(null);
+  const [scriptVersion, setScriptVersion] = useState<'v6' | 'v7'>('v6');
+  const [copiedScript, setCopiedScript] = useState(false);
   const [activeTrafficInterface, setActiveTrafficInterface] = useState<string | null>(null);
   const [testingRouterId, setTestingRouterId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ routerId: string; success: boolean; latencyMs?: number; message?: string } | null>(null);
@@ -53,18 +70,24 @@ export default function RoutersPage() {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm({
     defaultValues: {
       name: '',
+      connectionMethod: RouterConnectionMethod.SSTP_TUNNEL,
+      apiMethod: RouterApiMethod.AUTO,
       host: '',
       port: 8728,
       username: 'admin',
       password: '',
-      radiusSecret: 'testing123',
+      radiusSecret: '',
       testOnRegister: false,
     },
   });
+
+  const selectedConnectionMethod = watch('connectionMethod');
 
   const registerMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -85,7 +108,11 @@ export default function RoutersPage() {
       setRegisterError(null);
       reset();
       const statusNote = res?.status === 'ONLINE' ? 'Online & responsive' : res?.status;
-      setRegisterSuccess(`Router "${res?.name || 'New Router'}" (${res?.host || ''}) registered successfully! Status: ${statusNote}`);
+      setRegisterSuccess(`Router "${res?.name || 'New Router'}" registered successfully! Status: ${statusNote}`);
+      if (res?.connectionMethod === RouterConnectionMethod.SSTP_TUNNEL) {
+        setSelectedRouterForScript(res);
+        setScriptVersion(res?.majorVersion === 7 ? 'v7' : 'v6');
+      }
       setTimeout(() => setRegisterSuccess(null), 8000);
     },
     onError: (err: any) => {
@@ -177,6 +204,28 @@ export default function RoutersPage() {
     enabled: !!selectedRouterForInterfaces && !!activeTrafficInterface,
     refetchInterval: 3000, // Poll every 3s when modal is open
   });
+
+  // SSTP Provisioning Script Query for selected router
+  const { data: sstpScriptData, isLoading: isLoadingScript } = useQuery<{
+    script: string;
+    instructions: string;
+    serverHost: string;
+    username: string;
+    assignedIp: string;
+  }>({
+    queryKey: ['router-sstp-script', selectedRouterForScript?.id, scriptVersion],
+    queryFn: async () => {
+      if (!selectedRouterForScript) return null as any;
+      return apiFetch(`/routers/${selectedRouterForScript.id}/sstp-script?version=${scriptVersion}`);
+    },
+    enabled: !!selectedRouterForScript,
+  });
+
+  const handleCopyScript = (scriptText: string) => {
+    navigator.clipboard.writeText(scriptText);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 2500);
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -376,12 +425,40 @@ export default function RoutersPage() {
                         <div className="text-xs text-slate-400 font-mono mt-0.5">
                           {router.host}:{router.port} ({router.username})
                         </div>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          {router.connectionMethod === RouterConnectionMethod.SSTP_TUNNEL || router.vpnIp ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                              <ShieldCheck className="w-3 h-3" />
+                              SSTP Tunnel: {router.vpnIp || 'Allocated'}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                              <Globe className="w-3 h-3" />
+                              Direct IP
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-6 py-4">
                         <div className="text-slate-200 font-medium">{router.identity || 'MikroTik'}</div>
                         <div className="text-xs text-slate-400">
-                          {router.model || 'CCR / CHR'} • {router.rosVersion || 'ROS v7'}
+                          {router.model || 'CCR / CHR'} • {router.rosVersion || 'ROS'}
+                        </div>
+                        <div className="mt-1.5">
+                          {router.majorVersion === 6 || router.apiMethod === RouterApiMethod.BINARY_API ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                              ROS 6 Binary API (8728)
+                            </span>
+                          ) : router.majorVersion === 7 || router.apiMethod === RouterApiMethod.REST_API ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                              ROS 7 REST API
+                            </span>
+                          ) : (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                              Auto Detect Engine
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -405,18 +482,30 @@ export default function RoutersPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-center gap-2">
                           <button
+                            onClick={() => {
+                              setSelectedRouterForScript(router);
+                              setScriptVersion(router.majorVersion === 7 ? 'v7' : 'v6');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-400 text-xs font-medium border border-cyan-500/20 transition"
+                            title="View MikroTik CLI provisioning script"
+                          >
+                            <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+                            Script
+                          </button>
+
+                          <button
                             onClick={() => testMutation.mutate(router.id)}
                             disabled={isTesting}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-xs font-medium border border-blue-500/20 transition disabled:opacity-50"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 text-xs font-medium border border-blue-500/20 transition disabled:opacity-50"
                             title="Test reachability & credentials"
                           >
                             <Zap className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
-                            {isTesting ? 'Testing...' : 'Test Connection'}
+                            {isTesting ? 'Testing...' : 'Test'}
                           </button>
 
                           <button
                             onClick={() => setSelectedRouterForResources(router)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
                             title="View CPU, RAM, and Disk telemetry"
                           >
                             <Cpu className="w-3.5 h-3.5 text-indigo-400" />
@@ -425,11 +514,11 @@ export default function RoutersPage() {
 
                           <button
                             onClick={() => setSelectedRouterForSessions(router)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
                             title="View active connected PPPoE subscribers"
                           >
                             <Users className="w-3.5 h-3.5 text-purple-400" />
-                            PPP Sessions
+                            Sessions
                           </button>
 
                           <button
@@ -437,7 +526,7 @@ export default function RoutersPage() {
                               setSelectedRouterForInterfaces(router);
                               setActiveTrafficInterface('ether1-wan');
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
                             title="View Interfaces and live bandwidth traffic"
                           >
                             <Network className="w-3.5 h-3.5 text-emerald-400" />
@@ -520,18 +609,97 @@ export default function RoutersPage() {
                 {errors.name && <p className="text-xs text-rose-400 mt-1">{errors.name.message as string}</p>}
               </div>
 
+              {/* Connection Mode Selection */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Connection Method</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label
+                    className={`flex flex-col p-3 rounded-xl border cursor-pointer transition ${
+                      selectedConnectionMethod === RouterConnectionMethod.SSTP_TUNNEL
+                        ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        value={RouterConnectionMethod.SSTP_TUNNEL}
+                        {...register('connectionMethod')}
+                        className="text-cyan-500 focus:ring-cyan-400"
+                      />
+                      <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-semibold text-slate-200">SSTP Tunnel</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1 leading-snug">
+                      Outbound VPN (CGNAT / NAT / Firewalls). Works on any MikroTik!
+                    </span>
+                  </label>
+
+                  <label
+                    className={`flex flex-col p-3 rounded-xl border cursor-pointer transition ${
+                      selectedConnectionMethod === RouterConnectionMethod.DIRECT_API
+                        ? 'bg-blue-500/10 border-blue-500/40 text-blue-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        value={RouterConnectionMethod.DIRECT_API}
+                        {...register('connectionMethod')}
+                        className="text-blue-500 focus:ring-blue-400"
+                      />
+                      <Globe className="w-4 h-4 text-blue-400" />
+                      <span className="text-xs font-semibold text-slate-200">Direct IP / Public</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1 leading-snug">
+                      Requires public IP or forwarded inbound API ports on router.
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Management API Protocol */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">RouterOS Management Protocol</label>
+                <select
+                  {...register('apiMethod')}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value={RouterApiMethod.AUTO}>Auto Detect (Try ROS 7 REST, fallback to ROS 6 Binary API)</option>
+                  <option value={RouterApiMethod.BINARY_API}>RouterOS 6.x Binary API (Port 8728 - for ROS 6.45+)</option>
+                  <option value={RouterApiMethod.REST_API}>RouterOS 7.x REST API (Port 80/443)</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  RouterOS 6 routers (e.g. v6.45.1) use Binary API (TCP 8728). RouterOS 7 routers support modern REST API.
+                </p>
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Host IP / Domain</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    {selectedConnectionMethod === RouterConnectionMethod.SSTP_TUNNEL
+                      ? 'Host IP (Optional - tunnel IP assigned)'
+                      : 'Host IP / Domain'}
+                  </label>
                   <input
-                    {...register('host', { required: 'Host IP or domain is required' })}
-                    placeholder="192.168.88.1"
+                    {...register('host', {
+                      required:
+                        selectedConnectionMethod === RouterConnectionMethod.DIRECT_API
+                          ? 'Host IP is required for Direct IP mode'
+                          : false,
+                    })}
+                    placeholder={
+                      selectedConnectionMethod === RouterConnectionMethod.SSTP_TUNNEL
+                        ? 'Assigned from VPN pool (10.200.x.x)'
+                        : '192.168.88.1 or 103.170.1.22'
+                    }
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                   />
                   {errors.host && <p className="text-xs text-rose-400 mt-1">{errors.host.message as string}</p>}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Port</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">API Port</label>
                   <input
                     type="number"
                     {...register('port', {
@@ -543,9 +711,6 @@ export default function RoutersPage() {
                   {errors.port && <p className="text-xs text-rose-400 mt-1">{errors.port.message as string}</p>}
                 </div>
               </div>
-              <p className="text-[11px] text-slate-500 -mt-2">
-                REST API: port 80 (HTTP) or 443 (HTTPS) | WinBox API: port 8728
-              </p>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -573,11 +738,11 @@ export default function RoutersPage() {
                 <label className="block text-xs font-medium text-slate-300 mb-1">RADIUS Shared Secret (FreeRADIUS NAS)</label>
                 <input
                   {...register('radiusSecret')}
-                  placeholder="testing123"
+                  placeholder="Leave blank to auto-generate strong random secret"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Synchronized to FreeRADIUS NAS table for PPPoE AAA authentication.
+                  Synchronized to FreeRADIUS NAS table for PPPoE AAA authentication (auto-generated securely if blank).
                 </p>
               </div>
 
@@ -908,6 +1073,122 @@ export default function RoutersPage() {
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setSelectedRouterForInterfaces(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Router Provisioning & SSTP Script */}
+      {selectedRouterForScript && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+                  <Terminal className="w-5 h-5 text-cyan-400" />
+                  MikroTik Remote Onboarding Script
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {selectedRouterForScript.name} (Tunnel Management IP:{' '}
+                  <span className="text-cyan-400 font-mono font-semibold">
+                    {selectedRouterForScript.vpnIp || '10.200.x.x'}
+                  </span>
+                  )
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedRouterForScript(null)}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Version Switcher Tabs */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 mr-1">Target RouterOS:</span>
+                <button
+                  type="button"
+                  onClick={() => setScriptVersion('v6')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    scriptVersion === 'v6'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  RouterOS v6.x (Legacy)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScriptVersion('v7')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    scriptVersion === 'v7'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  RouterOS v7.x (Modern)
+                </button>
+              </div>
+              {selectedRouterForScript.majorVersion && (
+                <span className="text-[11px] text-slate-500 font-mono">
+                  Detected HW: ROS {selectedRouterForScript.rosVersion || `v${selectedRouterForScript.majorVersion}`}
+                </span>
+              )}
+            </div>
+
+            {/* Step-by-step Instructions */}
+            <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1.5">
+              <p className="font-semibold text-slate-200 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                Quick Installation Steps:
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-slate-400 pl-1 text-[11px]">
+                <li>Connect to your MikroTik router using WinBox or SSH.</li>
+                <li>Open <code className="text-cyan-300 font-mono bg-slate-900 px-1 py-0.5 rounded">New Terminal</code> from the left menu.</li>
+                <li>Copy the CLI script below, paste it into the Terminal, and press Enter.</li>
+                <li>The router will establish an outbound SSTP tunnel to the SaaS and configure RADIUS AAA client.</li>
+              </ol>
+            </div>
+
+            {/* Script Display */}
+            {isLoadingScript ? (
+              <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                Generating device-tailored RouterOS script...
+              </div>
+            ) : sstpScriptData ? (
+              <div className="relative">
+                <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-cyan-200 max-h-72 overflow-y-auto whitespace-pre-wrap selection:bg-cyan-500/30">
+                  {sstpScriptData.script}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => handleCopyScript(sstpScriptData.script)}
+                  className="absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium shadow-lg transition"
+                >
+                  {copiedScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedScript ? 'Copied!' : 'Copy Script'}
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300">
+                Failed to generate provisioning script. Ensure router VPN credentials are set.
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-2">
+              <span className="text-[11px] text-slate-500 font-mono">
+                Outbound SSTP TLS (TCP 443) • FreeRADIUS AAA (UDP 1812/1813)
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedRouterForScript(null)}
                 className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium"
               >
                 Close

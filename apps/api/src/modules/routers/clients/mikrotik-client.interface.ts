@@ -8,4 +8,5 @@ export {
   RouterInterface,
   InterfaceTraffic,
   TestConnectionResult,
+  RouterCapabilities,
 } from '@isp-crm/shared';

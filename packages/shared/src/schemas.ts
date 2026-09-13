@@ -11,6 +11,28 @@ import {
   BillingCycle,
   SpeedUnit,
 } from './enums';
+import { normalizeMacAddress } from './mac-utils';
+
+export const MacAddressSchema = z
+  .string()
+  .optional()
+  .nullable()
+  .or(z.literal(''))
+  .refine(
+    (val) => {
+      if (!val || (typeof val === 'string' && val.trim() === '')) return true;
+      try {
+        normalizeMacAddress(val);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    {
+      message:
+        'Invalid MAC address format. Accepted formats: AA:BB:CC:DD:EE:FF, AA-BB-CC-DD-EE-FF, aabb.ccdd.eeff, or AABBCCDDEEFF',
+    }
+  );
 
 export const LoginSchema = z.object({
   email: z.string().email(),
@@ -75,6 +97,7 @@ export const CreateCustomerSchema = z.object({
   installationDate: z.string().optional().or(z.literal('')),
   notes: z.string().optional().or(z.literal('')),
   staticIp: z.string().ip().optional().or(z.literal('')),
+  macAddress: MacAddressSchema,
   planId: z.string().uuid().optional().or(z.literal('')),
 });
 
@@ -100,6 +123,7 @@ export const UpdateCustomerSchema = z.object({
   installationDate: z.string().optional().or(z.literal('')),
   notes: z.string().optional().or(z.literal('')),
   staticIp: z.string().ip().optional().or(z.literal('')),
+  macAddress: MacAddressSchema,
   planId: z.string().uuid().optional().or(z.literal('')),
 });
 

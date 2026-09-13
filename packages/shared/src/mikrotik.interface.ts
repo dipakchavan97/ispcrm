@@ -1,4 +1,11 @@
-import { RouterStatus } from './enums';
+import { RouterStatus, RouterConnectionMethod, RouterApiMethod } from './enums';
+
+export interface RouterCapabilities {
+  rest: boolean;
+  binaryApi: boolean;
+  sstp: boolean;
+  coa: boolean;
+}
 
 export interface RouterConnectionConfig {
   host: string;
@@ -7,6 +14,9 @@ export interface RouterConnectionConfig {
   password: string; // Plaintext in-memory only; never persisted or logged
   timeoutMs?: number;
   useSsl?: boolean;
+  connectionMethod?: RouterConnectionMethod;
+  apiMethod?: RouterApiMethod;
+  vpnIp?: string;
 }
 
 export interface RouterIdentity {
@@ -67,6 +77,10 @@ export interface TestConnectionResult {
   model?: string;
   latencyMs?: number;
   errorMessage?: string;
+  majorVersion?: number;
+  minorVersion?: number;
+  apiMethodUsed?: 'REST_API' | 'BINARY_API' | 'MOCK';
+  capabilities?: RouterCapabilities;
 }
 
 export interface MikrotikClient {
@@ -86,6 +100,9 @@ export interface RegisterRouterInput {
   password: string; // Received from frontend over TLS, encrypted immediately at rest
   radiusSecret?: string;
   testOnRegister?: boolean;
+  connectionMethod?: RouterConnectionMethod;
+  apiMethod?: RouterApiMethod;
+  vpnIp?: string;
 }
 
 export interface UpdateRouterInput {
@@ -96,6 +113,23 @@ export interface UpdateRouterInput {
   password?: string;
   radiusSecret?: string;
   status?: RouterStatus;
+  connectionMethod?: RouterConnectionMethod;
+  apiMethod?: RouterApiMethod;
+  vpnIp?: string;
+}
+
+export interface SstpConfigResult {
+  routerId: string;
+  routerName: string;
+  vpnIp: string;
+  vpnUsername: string;
+  vpnPasswordPlain: string;
+  sstpServerHost: string;
+  sstpServerPort: number;
+  radiusServerIp: string;
+  radiusSecret: string;
+  routerOsVersion: 'v6' | 'v7';
+  script: string;
 }
 
 /**
@@ -115,6 +149,15 @@ export interface RouterDto {
   rosVersion?: string | null;
   identity?: string | null;
   radiusSecret?: string | null;
+  connectionMethod?: RouterConnectionMethod | string;
+  apiMethod?: RouterApiMethod | string;
+  vpnIp?: string | null;
+  vpnUsername?: string | null;
+  majorVersion?: number | null;
+  minorVersion?: number | null;
+  arch?: string | null;
+  lastError?: string | null;
+  capabilities?: RouterCapabilities | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 }

@@ -12,15 +12,7 @@ export interface ApiResponse<T = any> {
 let memoryToken: string | null = null;
 
 export function getApiBase(): string {
-  if (typeof window !== 'undefined') {
-    const envUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (envUrl && !envUrl.includes('localhost')) {
-      return envUrl;
-    }
-    // Match current browser hostname dynamically (e.g. localhost, 127.0.0.1, LAN IP)
-    return `${window.location.protocol}//${window.location.hostname}:4000/api`;
-  }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+  return process.env.NEXT_PUBLIC_API_URL || '/api';
 }
 
 export function getAuthToken(): string | null {
@@ -45,37 +37,13 @@ export function clearAuthToken() {
 }
 
 /**
- * Ensure an active authenticated session.
- * If no token is found or forceRefresh is requested, logs in with default seed administrator.
+ * Redirect to login if unauthenticated or session expired
  */
-export async function ensureAuthToken(forceRefresh = false): Promise<string> {
-  if (!forceRefresh) {
-    const token = getAuthToken();
-    if (token) {
-      return token;
-    }
+export function redirectToLogin() {
+  clearAuthToken();
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.href = '/login';
   }
-
-  const apiBase = getApiBase();
-  try {
-    const res = await fetch(`${apiBase}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'admin@speednet.in',
-        password: 'admin123',
-      }),
-    });
-    const json = await res.json();
-    if (json.data?.accessToken) {
-      setAuthToken(json.data.accessToken);
-      return json.data.accessToken;
-    }
-  } catch (err) {
-    console.error('Failed auto-authenticating seed admin:', err);
-  }
-
-  return '';
 }
 
 export async function apiFetch<T = any>(
@@ -83,10 +51,7 @@ export async function apiFetch<T = any>(
   options: RequestInit = {},
   retryCount = 0,
 ): Promise<T> {
-  let token = getAuthToken();
-  if (!token) {
-    token = await ensureAuthToken();
-  }
+  const token = getAuthToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -112,13 +77,10 @@ export async function apiFetch<T = any>(
     throw new Error(`Network connection error: ${netErr.message || 'Unable to connect to ISP CRM API'}`);
   }
 
-  // Auto-recover from 401 Unauthorized (expired token in localStorage)
-  if (response.status === 401 && retryCount === 0) {
-    clearAuthToken();
-    const newToken = await ensureAuthToken(true);
-    if (newToken) {
-      return apiFetch<T>(endpoint, options, retryCount + 1);
-    }
+  // Handle 401 Unauthorized (expired or invalid token)
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new Error('Session expired or unauthorized. Please log in again.');
   }
 
   let json: ApiResponse<T>;

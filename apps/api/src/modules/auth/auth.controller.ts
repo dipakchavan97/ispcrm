@@ -11,6 +11,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import {
   LoginInput,
@@ -24,6 +25,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @RateLimit({ limit: 15, ttlSec: 3600, keyPrefix: 'register_org' })
   @Post('register-org')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register New ISP Organization & Initial ISP_OWNER' })
@@ -32,6 +34,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit({ limit: 30, ttlSec: 60, keyPrefix: 'login' })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Admin User Login' })
@@ -40,6 +43,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit({ limit: 60, ttlSec: 60, keyPrefix: 'refresh' })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh Access Token using Valid Refresh Token' })

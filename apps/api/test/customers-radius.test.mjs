@@ -134,6 +134,19 @@ test('Subscriber & FreeRADIUS Lifecycle Orchestration', async (t) => {
   });
   assert.equal(subRestored.status, SubscriptionStatus.ACTIVE);
 
+  // Verify radreply restored on reactivation
+  const radReplyRestoredIp = await prisma.radReply.findFirst({
+    where: { username: pppoeUser, attribute: 'Framed-IP-Address' },
+  });
+  assert.ok(radReplyRestoredIp, 'radreply framed IP record must exist after reactivation');
+  assert.equal(radReplyRestoredIp.value, staticIp);
+
+  const radReplyRestoredRate = await prisma.radReply.findFirst({
+    where: { username: pppoeUser, attribute: 'Mikrotik-Rate-Limit' },
+  });
+  assert.ok(radReplyRestoredRate, 'radreply rate limit record must exist after reactivation');
+  assert.equal(radReplyRestoredRate.value, standardPlan.rateLimitString);
+
   // 6. Subscription Renewal
   const oldEndDate = subRestored.endDate;
   const renewedSub = await subscriptionsService.renew(orgId, subs[0].id);
@@ -152,5 +165,66 @@ test('Subscriber & FreeRADIUS Lifecycle Orchestration', async (t) => {
   // 8. Disconnect Endpoint
   const disconnectRes = await customersService.disconnect(orgId, customer.id);
   assert.equal(disconnectRes.status, 'DISPATCHED');
-  assert.equal(disconnectRes.pppoeUsername, pppoeUser);
+  assert.equal(disconnectRes.pppoeUsername, `${pppoeUser}@ispcrm`);
+
+  // 9. Phase 9J Focused Regression Test: Dynamic Pool Customer Reactivation & Password Preservation
+  const poolUser = `apex_pool_${ts}`;
+  const poolPass = 'securePoolPass9J!';
+
+  const poolCustomer = await customersService.create(orgId, {
+    name: 'Ramesh Patel',
+    customerCode: `CUST-PATEL-${ts}`,
+    email: `ramesh.${ts}@gmail.com`,
+    phone: '9876543211',
+    installationAddress: 'Shop 12, Market Yard, Pune',
+    pppoeUsername: poolUser,
+    pppoePassword: poolPass,
+    planId: standardPlan.id,
+  });
+
+  const dbCustomerCreated = await prisma.customer.findUnique({ where: { id: poolCustomer.id } });
+  assert.equal(dbCustomerCreated.pppoePassword, poolPass);
+
+  // 9.1 Verify initial Framed-Pool = pppoe in radreply
+  const initialPool = await prisma.radReply.findFirst({
+    where: { username: poolUser, attribute: 'Framed-Pool' },
+  });
+  assert.ok(initialPool, 'Dynamic customer must have Framed-Pool');
+  assert.equal(initialPool.value, 'pppoe');
+
+  // 9.2 Test Defect 1: Update customer with empty pppoePassword: "" must NOT overwrite persisted password
+  await customersService.update(orgId, undefined, poolCustomer.id, {
+    address: 'Updated Address 456',
+    pppoePassword: '', // empty string from "leave blank to keep current"
+  });
+  const dbCustomerAfterUpdate = await prisma.customer.findUnique({ where: { id: poolCustomer.id } });
+  assert.equal(dbCustomerAfterUpdate.pppoePassword, poolPass, 'Empty password update must not overwrite persisted password');
+
+  // 9.3 Suspend customer
+  await customersService.suspend(orgId, poolCustomer.id);
+  const poolCheckSuspended = await prisma.radCheck.findFirst({
+    where: { username: poolUser, attribute: 'Cleartext-Password' },
+  });
+  assert.match(poolCheckSuspended.value, /^SUSPENDED_/);
+
+  // 9.4 Test Defect 2: Reactivate customer must restore Framed-Pool = pppoe and original pppoePassword
+  const poolReactivateRes = await customersService.reactivate(orgId, poolCustomer.id);
+  assert.equal(poolReactivateRes.customer.status, CustomerStatus.ACTIVE);
+
+  const poolCheckRestored = await prisma.radCheck.findFirst({
+    where: { username: poolUser, attribute: 'Cleartext-Password' },
+  });
+  assert.equal(poolCheckRestored.value, poolPass, 'Reactivation must restore persisted pppoe password');
+
+  const poolReplyRestored = await prisma.radReply.findFirst({
+    where: { username: poolUser, attribute: 'Framed-Pool' },
+  });
+  assert.ok(poolReplyRestored, 'Reactivation must restore Framed-Pool attribute');
+  assert.equal(poolReplyRestored.value, 'pppoe');
+
+  const poolRateRestored = await prisma.radReply.findFirst({
+    where: { username: poolUser, attribute: 'Mikrotik-Rate-Limit' },
+  });
+  assert.ok(poolRateRestored, 'Reactivation must restore Mikrotik-Rate-Limit');
+  assert.equal(poolRateRestored.value, standardPlan.rateLimitString);
 });

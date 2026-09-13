@@ -31,3 +31,21 @@ Thumbs.db
 data/
 scratch/
 *.tsbuildinfo
+
+# Backups & Dumps
+backups/
+*.dump
+*.sql.gz
+
+# Certificates & Private Keys
+certs/
+certbot_data/
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+
+# Cloudflare & API Credentials
+*.ini
+.cloudflare/

@@ -18,6 +18,7 @@ import {
   NotificationEventType,
   ExpiryProcessingResult,
   RenewalProcessingResult,
+  getRadiusUsernameCandidates,
 } from '@isp-crm/shared';
 import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
@@ -189,21 +190,24 @@ export class SubscriptionAutomationService {
         },
       });
 
-      // 3a. Invalidate FreeRADIUS credentials in radcheck & radreply
+      // 3a. Invalidate FreeRADIUS credentials in radcheck & radreply for all candidates
       if (sub.customer?.username) {
+        const targetUsernames = getRadiusUsernameCandidates(sub.customer.username);
         await tx.radCheck.deleteMany({
-          where: { username: sub.customer.username, attribute: 'Cleartext-Password' },
+          where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' },
         });
-        await tx.radCheck.create({
-          data: {
-            username: sub.customer.username,
-            attribute: 'Cleartext-Password',
-            op: ':=',
-            value: `SUSPENDED_${Date.now()}`,
-          },
-        });
+        for (const u of targetUsernames) {
+          await tx.radCheck.create({
+            data: {
+              username: u,
+              attribute: 'Cleartext-Password',
+              op: ':=',
+              value: `SUSPENDED_${Date.now()}`,
+            },
+          });
+        }
         await tx.radReply.deleteMany({
-          where: { username: sub.customer.username },
+          where: { username: { in: targetUsernames } },
         });
       }
 
@@ -436,55 +440,60 @@ export class SubscriptionAutomationService {
           },
         });
 
-        // 3a. Restore FreeRADIUS radcheck credentials and radreply limits
+        // 3a. Restore FreeRADIUS radcheck credentials and radreply limits for all candidates
         if (invoice.customer.username) {
+          const targetUsernames = getRadiusUsernameCandidates(invoice.customer.username);
           await tx.radCheck.deleteMany({
-            where: { username: invoice.customer.username, attribute: 'Cleartext-Password' },
+            where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' },
           });
-          await tx.radCheck.create({
-            data: {
-              username: invoice.customer.username,
-              attribute: 'Cleartext-Password',
-              op: ':=',
-              value: invoice.customer.pppoePassword || '123456',
-            },
-          });
+          for (const u of targetUsernames) {
+            await tx.radCheck.create({
+              data: {
+                username: u,
+                attribute: 'Cleartext-Password',
+                op: ':=',
+                value: invoice.customer.pppoePassword,
+              },
+            });
+          }
 
           if (targetSub.plan) {
             const radiusPolicy = translateNetworkPolicyToRadius(buildNetworkPolicyFromPlan(targetSub.plan));
             rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
 
             await tx.radReply.deleteMany({
-              where: { username: invoice.customer.username },
+              where: { username: { in: targetUsernames } },
             });
-            await tx.radReply.createMany({
-              data: [
-                {
-                  username: invoice.customer.username,
-                  attribute: 'Mikrotik-Rate-Limit',
-                  op: '=',
-                  value: rateLimit,
-                },
-                {
-                  username: invoice.customer.username,
-                  attribute: 'Framed-Protocol',
-                  op: '=',
-                  value: 'PPP',
-                },
-                {
-                  username: invoice.customer.username,
-                  attribute: 'Service-Type',
-                  op: '=',
-                  value: 'Framed-User',
-                },
-                {
-                  username: invoice.customer.username,
-                  attribute: 'Acct-Interim-Interval',
-                  op: '=',
-                  value: '300',
-                },
-              ],
-            });
+            for (const u of targetUsernames) {
+              await tx.radReply.createMany({
+                data: [
+                  {
+                    username: u,
+                    attribute: 'Mikrotik-Rate-Limit',
+                    op: '=',
+                    value: rateLimit,
+                  },
+                  {
+                    username: u,
+                    attribute: 'Framed-Protocol',
+                    op: '=',
+                    value: 'PPP',
+                  },
+                  {
+                    username: u,
+                    attribute: 'Service-Type',
+                    op: '=',
+                    value: 'Framed-User',
+                  },
+                  {
+                    username: u,
+                    attribute: 'Acct-Interim-Interval',
+                    op: '=',
+                    value: '300',
+                  },
+                ],
+              });
+            }
           }
         }
       }

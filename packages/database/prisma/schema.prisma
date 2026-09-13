@@ -103,6 +103,22 @@ enum AuditAction {
   GENERATE_INVOICE
 }
 
+enum TicketStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
 // --------------------------------------------------------
 // CRM Core Models
 // --------------------------------------------------------
@@ -134,6 +150,7 @@ model Organization {
   auditLogs       AuditLog[]
   invoices        Invoice[]
   payments        Payment[]
+  tickets         Ticket[]
 
   @@map("organizations")
 }
@@ -196,6 +213,7 @@ model Customer {
   subscriptions       Subscription[]
   invoices            Invoice[]
   payments            Payment[]
+  tickets             Ticket[]
 
   @@unique([organizationId, customerCode])
   @@index([organizationId, status])
@@ -407,7 +425,17 @@ model Router {
   model               String?
   rosVersion          String?
   identity            String?
-  radiusSecret        String?         @default("testing123")
+  radiusSecret        String?
+  connectionMethod    String?         @default("DIRECT_API")
+  apiMethod           String?         @default("AUTO")
+  vpnIp               String?
+  vpnUsername         String?
+  encryptedVpnSecret  String?
+  majorVersion        Int?
+  minorVersion        Int?
+  arch                String?
+  lastError           String?
+  capabilities        Json?
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
@@ -416,6 +444,7 @@ model Router {
   @@unique([organizationId, host])
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([organizationId, connectionMethod])
   @@map("routers")
 }
 
@@ -437,6 +466,46 @@ model AuditLog {
   @@index([organizationId, createdAt])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+model Ticket {
+  id              String         @id @default(uuid())
+  organizationId  String
+  customerId      String?
+  ticketNumber    String
+  title           String
+  description     String
+  category        String         @default("TECHNICAL")
+  priority        TicketPriority @default(MEDIUM)
+  status          TicketStatus   @default(OPEN)
+  assignedTo      String?
+  createdById     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  comments        TicketComment[]
+
+  @@unique([organizationId, ticketNumber])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([status])
+  @@map("tickets")
+}
+
+model TicketComment {
+  id          String    @id @default(uuid())
+  ticketId    String
+  authorName  String
+  comment     String
+  isInternal  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_comments")
 }
 
 // --------------------------------------------------------
@@ -521,7 +590,7 @@ model RadAcct {
   acctterminatecause    String?
   servicetype           String?
   framedprotocol        String?
-  framedipaddress       String    @default("")
+  framedipaddress       String?   @default("")
   framedipv6address     String?
   framedipv6prefix      String?
   framedinterfaceid     String?

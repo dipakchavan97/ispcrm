@@ -18,6 +18,9 @@ import {
   DEFAULT_TIMEZONE,
   CoaAction,
   CoaRequestType,
+  getRadiusUsernameCandidates,
+  toPhysicalRadiusUsername,
+  normalizeMacAddress,
 } from '@isp-crm/shared';
 import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
@@ -775,14 +778,41 @@ export class SubscriptionsService {
     // Asynchronously queue RADIUS Disconnect-Request (PoD) to terminate live session on router
     const subscriberUsername = sub.customer?.username;
     if (this.coaQueueService && subscriberUsername) {
+      let targetUsername = toPhysicalRadiusUsername(subscriberUsername);
+      let activeSessionId: string | undefined;
+      let activeFramedIp: string | undefined;
+      let activeNasIp: string | undefined;
+
+      try {
+        const candidates = getRadiusUsernameCandidates(subscriberUsername);
+        const activeSession = await prisma.radAcct.findFirst({
+          where: {
+            username: { in: candidates },
+            acctstoptime: null,
+          },
+          orderBy: { acctstarttime: 'desc' },
+        });
+        if (activeSession) {
+          targetUsername = activeSession.username;
+          activeSessionId = activeSession.acctsessionid;
+          activeFramedIp = activeSession.framedipaddress || undefined;
+          activeNasIp = activeSession.nasipaddress || undefined;
+        }
+      } catch (err: any) {
+        console.warn(`[SubscriptionsService] Session resolution warning for suspend: ${err.message}`);
+      }
+
       this.coaQueueService
         .queueCoaJob({
           organizationId,
           customerId: sub.customerId,
           subscriptionId: sub.id,
-          username: subscriberUsername,
+          username: targetUsername,
           action: CoaAction.SUSPEND,
           requestType: CoaRequestType.DISCONNECT,
+          sessionId: activeSessionId,
+          framedIp: activeFramedIp,
+          nasIp: activeNasIp,
           reason: reason || 'Suspension applied',
           adminUserId: finalAdminUserId || undefined,
         })
@@ -981,7 +1011,7 @@ export class SubscriptionsService {
     validateSubscriptionTransition(sub.status as SubscriptionStatus, SubscriptionStatus.CANCELLED, 'cancel');
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: { status: SubscriptionStatus.CANCELLED },
@@ -1000,10 +1030,88 @@ export class SubscriptionsService {
         },
       });
 
+      // If customer has no remaining active or grace subscriptions, update customer status
+      const remainingActive = await tx.subscription.count({
+        where: {
+          customerId: sub.customerId,
+          status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE] },
+          id: { not: sub.id },
+        },
+      });
+
+      if (remainingActive === 0 && sub.customer) {
+        const prevCustStatus = sub.customer.status;
+        await tx.customer.update({
+          where: { id: sub.customerId },
+          data: { status: CustomerStatus.EXPIRED },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            organizationId,
+            adminUserId: finalAdminUserId,
+            action: AuditAction.STATUS_CHANGE,
+            entityType: 'CUSTOMER',
+            entityId: sub.customerId,
+            details: {
+              fromStatus: prevCustStatus,
+              toStatus: CustomerStatus.EXPIRED,
+              reason: 'All subscriptions cancelled',
+            },
+          },
+        });
+      }
+
       await this.syncRadiusOnDeactivation(tx, sub.customer);
 
       return updated;
     });
+
+    // Asynchronously queue RADIUS Disconnect-Request (PoD) to terminate live session on router
+    const subscriberUsername = sub.customer?.username;
+    if (this.coaQueueService && subscriberUsername) {
+      let targetUsername = toPhysicalRadiusUsername(subscriberUsername);
+      let activeSessionId: string | undefined;
+      let activeFramedIp: string | undefined;
+      let activeNasIp: string | undefined;
+
+      try {
+        const candidates = getRadiusUsernameCandidates(subscriberUsername);
+        const activeSession = await prisma.radAcct.findFirst({
+          where: {
+            username: { in: candidates },
+            acctstoptime: null,
+          },
+          orderBy: { acctstarttime: 'desc' },
+        });
+        if (activeSession) {
+          targetUsername = activeSession.username;
+          activeSessionId = activeSession.acctsessionid;
+          activeFramedIp = activeSession.framedipaddress || undefined;
+          activeNasIp = activeSession.nasipaddress || undefined;
+        }
+      } catch (err: any) {
+        console.warn(`[SubscriptionsService] Session resolution warning for cancel: ${err.message}`);
+      }
+
+      this.coaQueueService
+        .queueCoaJob({
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: sub.id,
+          username: targetUsername,
+          action: CoaAction.SUSPEND,
+          requestType: CoaRequestType.DISCONNECT,
+          sessionId: activeSessionId,
+          framedIp: activeFramedIp,
+          nasIp: activeNasIp,
+          reason: reason || 'Subscription cancelled',
+          adminUserId: finalAdminUserId || undefined,
+        })
+        .catch((err) => console.warn(`[SubscriptionsService] Failed to enqueue Disconnect for cancel: ${err.message}`));
+    }
+
+    return result;
   }
 
   /**
@@ -1033,60 +1141,93 @@ export class SubscriptionsService {
     });
 
     if (!customer.username) return;
+    const candidates = getRadiusUsernameCandidates(customer.username);
 
-    // 1. Valid subscriber authentication in radcheck
+    // 1. Valid subscriber authentication in radcheck for all candidates
     await tx.radCheck.deleteMany({
-      where: { username: customer.username, attribute: 'Cleartext-Password' },
+      where: { username: { in: candidates }, attribute: 'Cleartext-Password' },
     });
-    await tx.radCheck.create({
-      data: {
-        username: customer.username,
-        attribute: 'Cleartext-Password',
-        op: ':=',
-        value: customer.pppoePassword || '123456',
-      },
+    for (const u of candidates) {
+      await tx.radCheck.create({
+        data: {
+          username: u,
+          attribute: 'Cleartext-Password',
+          op: ':=',
+          value: customer.pppoePassword,
+        },
+      });
+    }
+
+    // 1b. Restore Calling-Station-Id check if customer has a bound MAC address
+    await tx.radCheck.deleteMany({
+      where: { username: { in: candidates }, attribute: 'Calling-Station-Id' },
     });
+    if (customer.macAddress) {
+      const canonicalMac = normalizeMacAddress(customer.macAddress);
+      if (canonicalMac) {
+        for (const u of candidates) {
+          await tx.radCheck.create({
+            data: {
+              username: u,
+              attribute: 'Calling-Station-Id',
+              op: '==',
+              value: canonicalMac,
+            },
+          });
+        }
+      }
+    }
 
     // 2. Clear previous reply attributes
     await tx.radReply.deleteMany({
-      where: { username: customer.username },
+      where: { username: { in: candidates } },
     });
 
     // 3. Set standard PPPoE & MikroTik authorization attributes
-    const replyAttributes = [
-      {
-        username: customer.username,
-        attribute: 'Mikrotik-Rate-Limit',
-        op: '=',
-        value: rateLimit,
-      },
-      {
-        username: customer.username,
-        attribute: 'Framed-Protocol',
-        op: '=',
-        value: 'PPP',
-      },
-      {
-        username: customer.username,
-        attribute: 'Service-Type',
-        op: '=',
-        value: 'Framed-User',
-      },
-      {
-        username: customer.username,
-        attribute: 'Acct-Interim-Interval',
-        op: '=',
-        value: '300',
-      },
-    ];
+    const replyAttributes: Array<{ username: string; attribute: string; op: string; value: string }> = [];
+    for (const u of candidates) {
+      replyAttributes.push(
+        {
+          username: u,
+          attribute: 'Mikrotik-Rate-Limit',
+          op: '=',
+          value: rateLimit,
+        },
+        {
+          username: u,
+          attribute: 'Framed-Protocol',
+          op: '=',
+          value: 'PPP',
+        },
+        {
+          username: u,
+          attribute: 'Service-Type',
+          op: '=',
+          value: 'Framed-User',
+        },
+        {
+          username: u,
+          attribute: 'Acct-Interim-Interval',
+          op: '=',
+          value: '60',
+        },
+      );
 
-    if (customer.staticIp) {
-      replyAttributes.push({
-        username: customer.username,
-        attribute: 'Framed-IP-Address',
-        op: '=',
-        value: customer.staticIp,
-      });
+      if (customer.staticIp) {
+        replyAttributes.push({
+          username: u,
+          attribute: 'Framed-IP-Address',
+          op: '=',
+          value: customer.staticIp,
+        });
+      } else {
+        replyAttributes.push({
+          username: u,
+          attribute: 'Framed-Pool',
+          op: '=',
+          value: 'pppoe',
+        });
+      }
     }
 
     await tx.radReply.createMany({
@@ -1099,23 +1240,26 @@ export class SubscriptionsService {
    */
   private async syncRadiusOnDeactivation(tx: any, customer: any) {
     if (!customer.username) return;
+    const candidates = getRadiusUsernameCandidates(customer.username);
 
-    // Invalidate password in radcheck to trigger Access-Reject
+    // Invalidate password in radcheck to trigger Access-Reject for all candidates
     await tx.radCheck.deleteMany({
-      where: { username: customer.username, attribute: 'Cleartext-Password' },
+      where: { username: { in: candidates }, attribute: 'Cleartext-Password' },
     });
-    await tx.radCheck.create({
-      data: {
-        username: customer.username,
-        attribute: 'Cleartext-Password',
-        op: ':=',
-        value: `DISABLED_${Date.now()}`,
-      },
-    });
+    for (const u of candidates) {
+      await tx.radCheck.create({
+        data: {
+          username: u,
+          attribute: 'Cleartext-Password',
+          op: ':=',
+          value: `DISABLED_${Date.now()}`,
+        },
+      });
+    }
 
     // Remove all authorization replies
     await tx.radReply.deleteMany({
-      where: { username: customer.username },
+      where: { username: { in: candidates } },
     });
   }
 }

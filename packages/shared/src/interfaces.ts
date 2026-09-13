@@ -93,3 +93,76 @@ export interface ActiveRadiusSessionDto {
   downloadBytes: number;
   uploadBytes: number;
 }
+
+export interface CustomerDto {
+  id: string;
+  organizationId: string;
+  customerCode: string;
+  name: string;
+  mobile: string;
+  phone?: string | null;
+  email?: string | null;
+  alternatePhone?: string | null;
+  address: string;
+  installationAddress?: string | null;
+  area?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  username: string;
+  pppoeUsername?: string | null;
+  staticIp?: string | null;
+  macAddress?: string | null;
+  status: CustomerStatus;
+  installationDate?: string | Date | null;
+  notes?: string | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
+  subscriptions?: any[];
+}
+
+export interface CreateCustomerDto {
+  name: string;
+  customerCode: string;
+  mobile: string;
+  phone?: string;
+  email?: string;
+  address: string;
+  installationAddress?: string;
+  area?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  username: string;
+  pppoeUsername?: string;
+  pppoePassword?: string;
+  status?: CustomerStatus;
+  installationDate?: string;
+  notes?: string;
+  staticIp?: string;
+  macAddress?: string | null;
+  planId?: string;
+}
+
+export interface UpdateCustomerDto {
+  name?: string;
+  customerCode?: string;
+  mobile?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  installationAddress?: string;
+  area?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  username?: string;
+  pppoePassword?: string;
+  status?: CustomerStatus;
+  installationDate?: string;
+  notes?: string;
+  staticIp?: string;
+  macAddress?: string | null;
+  planId?: string;
+}
+

@@ -54,6 +54,23 @@ export enum RouterStatus {
   OFFLINE = 'OFFLINE',
   UNREACHABLE = 'UNREACHABLE',
   ERROR = 'ERROR',
+  CONFIGURING = 'CONFIGURING',
+  CONNECTED = 'CONNECTED',
+  API_AUTH_FAILED = 'API_AUTH_FAILED',
+  VPN_UNREACHABLE = 'VPN_UNREACHABLE',
+  UNSUPPORTED_ROUTEROS = 'UNSUPPORTED_ROUTEROS',
+  DEGRADED = 'DEGRADED',
+}
+
+export enum RouterConnectionMethod {
+  DIRECT_API = 'DIRECT_API',
+  SSTP_TUNNEL = 'SSTP_TUNNEL',
+}
+
+export enum RouterApiMethod {
+  AUTO = 'AUTO',
+  REST_API = 'REST_API',
+  BINARY_API = 'BINARY_API',
 }
 
 export enum PlanStatus {
@@ -87,4 +104,20 @@ export enum AuditAction {
   COA_DISCONNECT = 'COA_DISCONNECT',
   COLLECT_PAYMENT = 'COLLECT_PAYMENT',
   GENERATE_INVOICE = 'GENERATE_INVOICE',
+}
+
+export enum TicketStatus {
+  OPEN = 'OPEN',
+  ASSIGNED = 'ASSIGNED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  WAITING_CUSTOMER = 'WAITING_CUSTOMER',
+  RESOLVED = 'RESOLVED',
+  CLOSED = 'CLOSED',
+}
+
+export enum TicketPriority {
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH',
+  URGENT = 'URGENT',
 }

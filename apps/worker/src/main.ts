@@ -1,4 +1,6 @@
 import http from 'node:http';
+import * as child_process from 'node:child_process';
+import * as dns from 'node:dns';
 import dotenv from 'dotenv';
 import { Worker, Queue } from 'bullmq';
 import Redis from 'ioredis';
@@ -8,6 +10,34 @@ import { processRadiusCoaJob } from './processors/radius-coa.processor';
 import { processRouterSyncJob } from './processors/router-sync.processor';
 
 dotenv.config();
+
+/**
+ * Automatically configures kernel route to 10.200.0.0/16 via the sstp container gateway.
+ */
+function setupVpnRoute() {
+  try {
+    const sstpHost = process.env.SSTP_SERVICE_HOST || 'sstp';
+    dns.lookup(sstpHost, (err, address) => {
+      if (!err && address) {
+        child_process.exec(`ip route replace 10.200.0.0/16 via ${address}`, (execErr) => {
+          if (execErr) {
+            console.debug(`[Worker] Kernel route configuration note: ${execErr.message}`);
+          } else {
+            console.log(`[Worker] Configured kernel route: 10.200.0.0/16 via ${address} (${sstpHost})`);
+          }
+        });
+      } else if (err) {
+        console.debug(`[Worker] DNS lookup for ${sstpHost} failed: ${err.message}`);
+      }
+    });
+  } catch (e: any) {
+    console.debug(`[Worker] setupVpnRoute error: ${e.message}`);
+  }
+}
+
+// Initialize route immediately and periodic re-check
+setupVpnRoute();
+const vpnRouteTimer = setInterval(setupVpnRoute, 60000);
 
 const redisHost = process.env.REDIS_HOST || 'localhost';
 const redisPort = Number(process.env.REDIS_PORT) || 6379;
@@ -93,6 +123,7 @@ startWorkers();
 async function shutdown() {
   console.log('[Worker] Graceful shutdown initiated...');
   server.close();
+  if (vpnRouteTimer) clearInterval(vpnRouteTimer);
   if (periodicExpiryTimer) clearInterval(periodicExpiryTimer);
   if (billingQueue) await billingQueue.close();
   if (billingWorker) await billingWorker.close();

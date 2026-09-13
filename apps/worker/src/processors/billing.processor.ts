@@ -20,6 +20,8 @@ import {
   SubscriptionAutomationJobData,
   ExpiryProcessingResult,
   RenewalProcessingResult,
+  getRadiusUsernameCandidates,
+  toPhysicalRadiusUsername,
 } from '@isp-crm/shared';
 
 export { SubscriptionAutomationJobData as BillingJobData };
@@ -125,22 +127,26 @@ export async function executeSubscriptionExpiryAutomation(
     });
 
     // 3a. Invalidate FreeRADIUS Credentials
+    // 3a. Invalidate FreeRADIUS credentials in radcheck & radreply for all candidates
     if (sub.customer?.username) {
+      const targetUsernames = getRadiusUsernameCandidates(sub.customer.username);
       await tx.radCheck.deleteMany({
-        where: { username: sub.customer.username, attribute: 'Cleartext-Password' },
+        where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' },
       });
-      await tx.radCheck.create({
-        data: {
-          username: sub.customer.username,
-          attribute: 'Cleartext-Password',
-          op: ':=',
-          value: `SUSPENDED_${Date.now()}`,
-        },
-      });
+      for (const u of targetUsernames) {
+        await tx.radCheck.create({
+          data: {
+            username: u,
+            attribute: 'Cleartext-Password',
+            op: ':=',
+            value: `SUSPENDED_${Date.now()}`,
+          },
+        });
+      }
 
       // Clear reply attributes
       await tx.radReply.deleteMany({
-        where: { username: sub.customer.username },
+        where: { username: { in: targetUsernames } },
       });
     }
 
@@ -181,21 +187,22 @@ export async function executeSubscriptionExpiryAutomation(
   let suspensionQueued = false;
   if (sub.customer?.username) {
     try {
+      const candidates = getRadiusUsernameCandidates(sub.customer.username);
       const activeSession = await prisma.radAcct.findFirst({
-        where: { username: sub.customer.username, acctstoptime: null },
+        where: { username: { in: candidates }, acctstoptime: null },
         orderBy: { acctstarttime: 'desc' },
       });
 
       let nasIp = activeSession?.nasipaddress || '127.0.0.1';
-      let nasPort = 3799;
+      const nasPort = 3799; // Explicit RFC 3576 / RFC 5176 UDP port; never overwrite with RouterOS API port
       let secret = 'testing123';
+      const targetUsername = activeSession?.username || toPhysicalRadiusUsername(sub.customer.username);
 
       const router = await prisma.router.findFirst({
         where: { organizationId: sub.organizationId },
       });
       if (router) {
         if (!activeSession?.nasipaddress) nasIp = router.host;
-        if (router.port) nasPort = router.port;
         if (router.radiusSecret) secret = router.radiusSecret;
       }
 
@@ -210,9 +217,9 @@ export async function executeSubscriptionExpiryAutomation(
         nasIp,
         nasPort,
         secret,
-        username: sub.customer.username,
+        username: targetUsername,
         sessionId: activeSession?.acctsessionid,
-        framedIp: activeSession?.framedipaddress,
+        framedIp: activeSession?.framedipaddress || undefined,
         timeoutMs: 2500,
         maxRetries: 2,
       });
@@ -412,55 +419,60 @@ export async function executePaymentRenewalAutomation(
         },
       });
 
-      // 3a. Restore FreeRADIUS Credentials in radcheck & radreply
+      // 3a. Restore FreeRADIUS Credentials in radcheck & radreply for all candidates
       if (invoice.customer.username) {
+        const targetUsernames = getRadiusUsernameCandidates(invoice.customer.username);
         await tx.radCheck.deleteMany({
-          where: { username: invoice.customer.username, attribute: 'Cleartext-Password' },
+          where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' },
         });
-        await tx.radCheck.create({
-          data: {
-            username: invoice.customer.username,
-            attribute: 'Cleartext-Password',
-            op: ':=',
-            value: invoice.customer.pppoePassword || '123456',
-          },
-        });
+        for (const u of targetUsernames) {
+          await tx.radCheck.create({
+            data: {
+              username: u,
+              attribute: 'Cleartext-Password',
+              op: ':=',
+              value: invoice.customer.pppoePassword || '123456',
+            },
+          });
+        }
 
         if (targetSub.plan) {
           const radiusPolicy = translateNetworkPolicyToRadius(buildNetworkPolicyFromPlan(targetSub.plan));
           rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
 
           await tx.radReply.deleteMany({
-            where: { username: invoice.customer.username },
+            where: { username: { in: targetUsernames } },
           });
-          await tx.radReply.createMany({
-            data: [
-              {
-                username: invoice.customer.username,
-                attribute: 'Mikrotik-Rate-Limit',
-                op: '=',
-                value: rateLimit,
-              },
-              {
-                username: invoice.customer.username,
-                attribute: 'Framed-Protocol',
-                op: '=',
-                value: 'PPP',
-              },
-              {
-                username: invoice.customer.username,
-                attribute: 'Service-Type',
-                op: '=',
-                value: 'Framed-User',
-              },
-              {
-                username: invoice.customer.username,
-                attribute: 'Acct-Interim-Interval',
-                op: '=',
-                value: '300',
-              },
-            ],
-          });
+          for (const u of targetUsernames) {
+            await tx.radReply.createMany({
+              data: [
+                {
+                  username: u,
+                  attribute: 'Mikrotik-Rate-Limit',
+                  op: '=',
+                  value: rateLimit,
+                },
+                {
+                  username: u,
+                  attribute: 'Framed-Protocol',
+                  op: '=',
+                  value: 'PPP',
+                },
+                {
+                  username: u,
+                  attribute: 'Service-Type',
+                  op: '=',
+                  value: 'Framed-User',
+                },
+                {
+                  username: u,
+                  attribute: 'Acct-Interim-Interval',
+                  op: '=',
+                  value: '300',
+                },
+              ],
+            });
+          }
         }
       }
     }
@@ -496,21 +508,22 @@ export async function executePaymentRenewalAutomation(
   let reactivationQueued = false;
   if (invoice.customer.username) {
     try {
+      const candidates = getRadiusUsernameCandidates(invoice.customer.username);
       const activeSession = await prisma.radAcct.findFirst({
-        where: { username: invoice.customer.username, acctstoptime: null },
+        where: { username: { in: candidates }, acctstoptime: null },
         orderBy: { acctstarttime: 'desc' },
       });
 
       let nasIp = activeSession?.nasipaddress || '127.0.0.1';
-      let nasPort = 3799;
+      const nasPort = 3799; // Explicit RFC 3576 / RFC 5176 UDP port; never overwrite with RouterOS API port
       let secret = 'testing123';
+      const targetUsername = activeSession?.username || toPhysicalRadiusUsername(invoice.customer.username);
 
       const router = await prisma.router.findFirst({
         where: { organizationId: invoice.organizationId },
       });
       if (router) {
         if (!activeSession?.nasipaddress) nasIp = router.host;
-        if (router.port) nasPort = router.port;
         if (router.radiusSecret) secret = router.radiusSecret;
       }
 
@@ -525,10 +538,10 @@ export async function executePaymentRenewalAutomation(
         nasIp,
         nasPort,
         secret,
-        username: invoice.customer.username,
+        username: targetUsername,
         rateLimit,
         sessionId: activeSession?.acctsessionid,
-        framedIp: activeSession?.framedipaddress,
+        framedIp: activeSession?.framedipaddress || undefined,
         timeoutMs: 2500,
         maxRetries: 2,
       });

@@ -62,6 +62,23 @@ export class UsersService {
       },
     });
 
+    // Security Audit Log: Staff creation
+    await prisma.auditLog
+      .create({
+        data: {
+          organizationId,
+          action: 'CREATE' as any,
+          entityType: 'ADMIN_USER',
+          entityId: user.id,
+          details: {
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          },
+        },
+      })
+      .catch(() => {});
+
     return user;
   }
 
@@ -94,7 +111,7 @@ export class UsersService {
       throw new ForbiddenException('Cannot assign ISP_OWNER role');
     }
 
-    return prisma.adminUser.update({
+    const updated = await prisma.adminUser.update({
       where: { id },
       data: {
         ...(data.isActive !== undefined && { isActive: data.isActive }),
@@ -110,5 +127,23 @@ export class UsersService {
         updatedAt: true,
       },
     });
+
+    // Security Audit Log: Staff update
+    await prisma.auditLog
+      .create({
+        data: {
+          organizationId,
+          action: 'UPDATE' as any,
+          entityType: 'ADMIN_USER',
+          entityId: id,
+          details: {
+            role: data.role,
+            isActive: data.isActive,
+          },
+        },
+      })
+      .catch(() => {});
+
+    return updated;
   }
 }

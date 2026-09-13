@@ -882,4 +882,64 @@ export class PaymentsService {
         : null,
     };
   }
+
+  /**
+   * Secure, idempotent payment gateway webhook receiver and settlement processor.
+   * Enforces HMAC signature verification, prevents replay attacks, and settles invoices.
+   */
+  async handleWebhook(body: any, headerSignature?: string) {
+    const signature = headerSignature || body?.signature || body?.eventSignature;
+    const webhookSecret = process.env.PAYMENT_WEBHOOK_SECRET;
+
+    // 1. Cryptographic HMAC verification if webhook secret is configured
+    if (webhookSecret) {
+      if (!signature) {
+        throw new BadRequestException('Missing payment webhook cryptographic signature');
+      }
+      const crypto = await import('crypto');
+      const payloadString = typeof body === 'string' ? body : JSON.stringify(body);
+      const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(payloadString)
+        .digest('hex');
+
+      const sigBuffer = Buffer.from(signature);
+      const expBuffer = Buffer.from(expectedSignature);
+      if (sigBuffer.length !== expBuffer.length || !crypto.timingSafeEqual(sigBuffer, expBuffer)) {
+        throw new BadRequestException('Invalid payment webhook signature');
+      }
+    }
+
+    // 2. Normalize webhook event details
+    const data = body?.data?.object || body?.payload?.payment?.entity || body;
+    const invoiceId = data?.invoiceId || body?.invoiceId;
+    const gatewayOrderId = data?.gatewayOrderId || data?.orderId || body?.gatewayOrderId || `ord_${Date.now()}`;
+    const gatewayPaymentId = data?.gatewayPaymentId || data?.id || body?.gatewayPaymentId;
+
+    if (!gatewayPaymentId) {
+      return { received: true, message: 'Non-payment notification acknowledged' };
+    }
+
+    if (!invoiceId) {
+      return { received: true, message: 'Missing invoice association in webhook payload' };
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { organization: true },
+    });
+
+    if (!invoice) {
+      return { received: true, message: 'Invoice not found or already settled' };
+    }
+
+    // 3. Atomically settle payment idempotently
+    return this.verifyAndSettleOnlinePayment(invoice.organizationId, undefined, {
+      invoiceId: invoice.id,
+      gatewayOrderId,
+      gatewayPaymentId,
+      signature,
+      idempotencyKey: `webhook_${gatewayPaymentId}`,
+    });
+  }
 }

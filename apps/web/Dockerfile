@@ -16,6 +16,10 @@ RUN npm install
 COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
 
+# Build arguments and environment for Next.js build time
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Build shared and web
 RUN npm run --workspace=@isp-crm/shared build
 RUN npm run --workspace=@isp-crm/web build
@@ -25,6 +29,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NEXT_PUBLIC_API_URL=/api
 
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules

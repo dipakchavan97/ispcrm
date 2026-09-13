@@ -1,0 +1,4 @@
+New-NetFirewallRule -DisplayName "ISPCRM-Temp-8443" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8443 -InterfaceAlias "Broadband Connection" -Profile Public,Domain,Private -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "ISPCRM-Temp-8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080 -InterfaceAlias "Broadband Connection" -Profile Public,Domain,Private -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "ISPCRM-Temp-2001" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 2001 -InterfaceAlias "Broadband Connection" -Profile Public,Domain,Private -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName "ISPCRM-Temp-50000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 50000 -InterfaceAlias "Broadband Connection" -Profile Public,Domain,Private -ErrorAction SilentlyContinue

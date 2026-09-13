@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useFieldArray } from 'react-hook-form';
 import {
@@ -565,7 +566,13 @@ export default function InvoicesPage() {
                       onClick={() => handleOpenDetails(inv)}
                     >
                       <td className="py-3 px-4 font-mono font-medium text-indigo-400">
-                        {inv.invoiceNumber}
+                        <Link
+                          href={`/invoices/${inv.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline hover:text-indigo-300"
+                        >
+                          {inv.invoiceNumber}
+                        </Link>
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-medium text-white">{inv.customer?.name}</div>

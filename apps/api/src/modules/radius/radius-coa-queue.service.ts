@@ -8,6 +8,8 @@ import {
   CoaRequestType,
   RadiusCoaJobData,
   AuditAction,
+  getRadiusUsernameCandidates,
+  toPhysicalRadiusUsername,
 } from '@isp-crm/shared';
 
 @Injectable()
@@ -61,6 +63,10 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
     action: CoaAction | string;
     requestType?: CoaRequestType | 'COA' | 'DISCONNECT';
     rateLimit?: string;
+    framedIp?: string;
+    sessionId?: string;
+    nasIp?: string;
+    nasPort?: number;
     reason?: string;
     adminUserId?: string;
     metadata?: Record<string, any>;
@@ -71,16 +77,18 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
     );
 
     // 1. Discover active session on NAS from radacct
-    let nasIp = '127.0.0.1';
-    let nasPort = 3799;
-    let sessionId: string | undefined;
-    let framedIp: string | undefined;
+    let nasIp = data.nasIp || '127.0.0.1';
+    const nasPort = data.nasPort || 3799; // Explicit RFC 3576 / RFC 5176 UDP port; never overwrite with RouterOS API port
+    let sessionId: string | undefined = data.sessionId;
+    let framedIp: string | undefined = data.framedIp;
     let secret = 'testing123';
+    let targetUsername = toPhysicalRadiusUsername(data.username);
 
     try {
+      const candidates = getRadiusUsernameCandidates(data.username);
       const activeSession = await prisma.radAcct.findFirst({
         where: {
-          username: data.username,
+          username: { in: candidates },
           acctstoptime: null,
         },
         orderBy: { acctstarttime: 'desc' },
@@ -90,15 +98,17 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
         where: { organizationId: data.organizationId },
       });
       if (router) {
-        if (!activeSession?.nasipaddress) nasIp = router.host;
-        if (router.port) nasPort = router.port;
+        if (!activeSession?.nasipaddress && (!data.nasIp || data.nasIp === '127.0.0.1')) {
+          nasIp = router.host;
+        }
         if (router.radiusSecret) secret = router.radiusSecret;
       }
 
       if (activeSession) {
-        if (activeSession.nasipaddress) nasIp = activeSession.nasipaddress;
-        sessionId = activeSession.acctsessionid;
-        framedIp = activeSession.framedipaddress;
+        if (!data.nasIp && activeSession.nasipaddress) nasIp = activeSession.nasipaddress;
+        targetUsername = activeSession.username;
+        if (!sessionId) sessionId = activeSession.acctsessionid;
+        if (!framedIp) framedIp = activeSession.framedipaddress || undefined;
 
         // Lookup NAS shared secret
         const nasRecord = await prisma.nas.findUnique({
@@ -116,7 +126,7 @@ export class RadiusCoaQueueService implements OnModuleInit, OnModuleDestroy {
       organizationId: data.organizationId,
       customerId: data.customerId,
       subscriptionId: data.subscriptionId,
-      username: data.username,
+      username: targetUsername,
       action: data.action,
       requestType,
       rateLimit: data.rateLimit,

@@ -105,7 +105,26 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    return this.generateTokensForUser(user, user.organization.name, user.organization.slug);
+    const tokens = await this.generateTokensForUser(user, user.organization.name, user.organization.slug);
+
+    // Security Audit Log: Record successful authentication
+    await prisma.auditLog
+      .create({
+        data: {
+          organizationId: user.organizationId,
+          adminUserId: user.id,
+          action: 'LOGIN' as any,
+          entityType: 'ADMIN_USER',
+          entityId: user.id,
+          details: {
+            email: user.email,
+            role: user.role,
+          },
+        },
+      })
+      .catch(() => {});
+
+    return tokens;
   }
 
   /**
@@ -137,13 +156,30 @@ export class AuthService {
   }
 
   /**
-   * Invalidate active refresh token for user
+   * Invalidate active refresh token for user and record audit log
    */
   async logout(userId: string): Promise<{ message: string }> {
+    const user = await prisma.adminUser.findUnique({ where: { id: userId } });
     await prisma.adminUser.update({
       where: { id: userId },
       data: { refreshTokenHash: null },
     });
+
+    if (user) {
+      await prisma.auditLog
+        .create({
+          data: {
+            organizationId: user.organizationId,
+            adminUserId: user.id,
+            action: 'LOGOUT' as any,
+            entityType: 'ADMIN_USER',
+            entityId: user.id,
+            details: { email: user.email },
+          },
+        })
+        .catch(() => {});
+    }
+
     return { message: 'Logged out successfully' };
   }
 

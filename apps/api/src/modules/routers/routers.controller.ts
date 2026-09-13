@@ -6,11 +6,15 @@ import {
   Delete,
   Body,
   Param,
+  Query,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MikrotikService } from './mikrotik.service';
 import { CurrentOrgId } from '../../common/decorators/current-org.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { UserRole } from '@isp-crm/shared';
 import { RegisterRouterInput, UpdateRouterInput } from '@isp-crm/shared';
 
@@ -19,6 +23,16 @@ import { RegisterRouterInput, UpdateRouterInput } from '@isp-crm/shared';
 @Controller('routers')
 export class RoutersController {
   constructor(private readonly routersService: MikrotikService) {}
+
+  @Public()
+  @Get('ca.crt')
+  @ApiOperation({ summary: 'Download ISPCRM SSTP VPN Root CA Certificate for MikroTik Trust' })
+  async getCaCertificate(@Res() res: Response) {
+    const cert = this.routersService.getRootCaCertificate();
+    res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+    res.setHeader('Content-Disposition', 'inline; filename="ispcrm-ca.crt"');
+    return res.send(cert);
+  }
 
   @Get()
   @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.TECHNICIAN, UserRole.READ_ONLY)
@@ -103,5 +117,16 @@ export class RoutersController {
     @Param('interfaceName') interfaceName: string,
   ) {
     return this.routersService.getInterfaceTraffic(organizationId, id, interfaceName);
+  }
+
+  @Get(':id/sstp-script')
+  @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.TECHNICIAN, UserRole.READ_ONLY)
+  @ApiOperation({ summary: 'Generate Version-Tailored MikroTik SSTP Setup Script (Tenant Enforced)' })
+  async getSstpScript(
+    @CurrentOrgId() organizationId: string,
+    @Param('id') id: string,
+    @Query('version') version?: 'v6' | 'v7',
+  ) {
+    return this.routersService.getSstpScript(organizationId, id, version);
   }
 }

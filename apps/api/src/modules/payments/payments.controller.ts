@@ -1,8 +1,20 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Headers,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import { CurrentOrgId } from '../../common/decorators/current-org.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '@isp-crm/shared';
 
@@ -75,6 +87,18 @@ export class PaymentsController {
     @Body() body: any,
   ) {
     return this.paymentsService.refundPayment(organizationId, adminUserId, id, body || {});
+  }
+
+  @Public()
+  @Post('webhook')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit({ limit: 60, ttlSec: 60, keyPrefix: 'payment_webhook' })
+  @ApiOperation({ summary: 'Asynchronous Payment Gateway Webhook Receiver (Signature-Verified & Idempotent)' })
+  async handleWebhook(
+    @Headers('x-webhook-signature') headerSignature: string | undefined,
+    @Body() body: any,
+  ) {
+    return this.paymentsService.handleWebhook(body, headerSignature);
   }
 
   @Get(':id')
