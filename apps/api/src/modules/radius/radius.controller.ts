@@ -4,12 +4,30 @@ import { RadiusService } from './radius.service';
 import { CurrentOrgId } from '../../common/decorators/current-org.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '@isp-crm/shared';
+import { AccessRequestsQueryDto } from './dto/access-requests-query.dto';
 
 @ApiTags('FreeRADIUS & Sessions')
 @ApiBearerAuth()
 @Controller('radius')
 export class RadiusController {
   constructor(private readonly radiusService: RadiusService) {}
+
+  @Get('access-requests')
+  @Roles(
+    UserRole.ISP_OWNER,
+    UserRole.ISP_ADMIN,
+    UserRole.TECHNICIAN,
+    UserRole.SUPPORT,
+    UserRole.READ_ONLY,
+  )
+  @ApiOperation({ summary: 'List Live FreeRADIUS Access Requests from radpostauth (Tenant Enforced)' })
+  async getAccessRequests(
+    @CurrentOrgId() organizationId: string,
+    @Query() query: AccessRequestsQueryDto,
+  ) {
+    return this.radiusService.getAccessRequests(organizationId, query);
+  }
+
 
   @Get('sessions/active')
   @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.TECHNICIAN, UserRole.SUPPORT, UserRole.READ_ONLY)
