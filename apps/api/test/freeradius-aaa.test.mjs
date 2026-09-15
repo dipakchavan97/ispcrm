@@ -6,7 +6,7 @@ import { prisma } from '@isp-crm/database';
 import { seedRadiusTestUsers } from '../scripts/seed-radius-test-users.mjs';
 
 // FreeRADIUS Server connection settings
-const RADIUS_HOST = '127.0.0.1';
+const RADIUS_HOST = process.env.RADIUS_HOST || '127.0.0.1';
 const AUTH_PORT = 1812;
 const ACCT_PORT = 1813;
 const RADIUS_SECRET = 'testing123';
@@ -231,6 +231,8 @@ function parseRadiusResponse(buf) {
       attributes['Session-Timeout'] = attrVal.readUInt32BE(0);
     } else if (attrType === 85) { // Acct-Interim-Interval
       attributes['Acct-Interim-Interval'] = attrVal.readUInt32BE(0);
+    } else if (attrType === 88) { // Framed-Pool
+      attributes['Framed-Pool'] = attrVal.toString('utf8');
     }
 
     offset += attrLen;

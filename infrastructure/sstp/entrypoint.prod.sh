@@ -64,8 +64,10 @@ iptables -A FORWARD -i eth0 -o sstp+ -j ACCEPT 2>/dev/null || true
 iptables -t nat -A POSTROUTING -o sstp+ -j MASQUERADE 2>/dev/null || true
 
 # Forward RADIUS traffic from SSTP tunnel interfaces to FreeRADIUS container
-FREERADIUS_IP=$(getent hosts ispcrm-freeradius 2>/dev/null | awk '{ print $1 }' | head -n 1)
-[ -z "$FREERADIUS_IP" ] && FREERADIUS_IP="172.23.0.2"
+# Resolve FreeRADIUS IP that is reachable on eth0's local subnet
+SSTP_SUBNET_PREFIX=$(ip -o -4 addr show eth0 | awk '{print $4}' | cut -d. -f1-2)
+FREERADIUS_IP=$(getent hosts ispcrm-freeradius 2>/dev/null | awk '{ print $1 }' | grep "^${SSTP_SUBNET_PREFIX}\." | head -n 1)
+[ -z "$FREERADIUS_IP" ] && FREERADIUS_IP="172.23.0.3"
 
 iptables -t nat -A PREROUTING -i sstp+ -p udp --dport 1812 -j DNAT --to-destination ${FREERADIUS_IP}:1812 2>/dev/null || true
 iptables -t nat -A PREROUTING -i sstp+ -p udp --dport 1813 -j DNAT --to-destination ${FREERADIUS_IP}:1813 2>/dev/null || true
