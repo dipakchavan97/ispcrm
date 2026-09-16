@@ -177,7 +177,7 @@ export class CustomersController {
     return this.customersService.overrideSpeed(organizationId, user?.userId, id, downloadMbps, uploadMbps);
   }
 
-  @Get(':id/caf.pdf')
+  @Get([':id/caf', ':id/caf.pdf'])
   @Roles(
     UserRole.ISP_OWNER,
     UserRole.ISP_ADMIN,
