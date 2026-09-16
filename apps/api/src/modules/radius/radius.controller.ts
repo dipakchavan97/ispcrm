@@ -29,6 +29,13 @@ export class RadiusController {
   }
 
 
+  @Get('sessions/metrics')
+  @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.TECHNICIAN, UserRole.SUPPORT, UserRole.READ_ONLY)
+  @ApiOperation({ summary: 'Get Real-Time Distinct Subscriber Online Metrics (Tenant Enforced)' })
+  async getSubscriberSessionMetrics(@CurrentOrgId() organizationId: string) {
+    return this.radiusService.getSubscriberSessionMetrics(organizationId);
+  }
+
   @Get('sessions/active')
   @Roles(UserRole.ISP_OWNER, UserRole.ISP_ADMIN, UserRole.TECHNICIAN, UserRole.SUPPORT, UserRole.READ_ONLY)
   @ApiOperation({ summary: 'List Real-Time Active PPPoE Sessions from radacct (Tenant Enforced)' })

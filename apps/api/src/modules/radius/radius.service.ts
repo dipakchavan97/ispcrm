@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, Optional } from '@nestjs/common';
 import { prisma } from '@isp-crm/database';
-import { CoaAction, CoaRequestType, getRadiusUsernameCandidates } from '@isp-crm/shared';
+import { CoaAction, CoaRequestType, getRadiusUsernameCandidates, CustomerStatus } from '@isp-crm/shared';
 import { RadiusCoaQueueService } from './radius-coa-queue.service';
 import { AccessRequestsQueryDto, AccessRequestStatusFilter } from './dto/access-requests-query.dto';
 
@@ -230,22 +230,47 @@ export class RadiusService {
   }
 
   async getActiveSessions(organizationId: string, filters: { username?: string }) {
-    // Get all customer PPPoE usernames belonging to this organization
+    // 1. Fetch all subscribers belonging to this organization (Strict Tenant Isolation)
     const orgCustomers = await prisma.customer.findMany({
       where: { organizationId },
-      select: { username: true },
+      select: {
+        id: true,
+        name: true,
+        customerCode: true,
+        username: true,
+        pppoeUsername: true,
+        status: true,
+      },
     });
 
-    let allowedUsernames = orgCustomers.map((c) => c.username);
-    if (allowedUsernames.length === 0) {
+    if (orgCustomers.length === 0) {
       return [];
     }
 
-    if (filters.username) {
-      allowedUsernames = allowedUsernames.filter((u) =>
-        u.toLowerCase().includes(filters.username!.toLowerCase()),
+    // 2. Map candidate usernames and realms back to their customer record
+    const candidateToCustomerMap = new Map<string, (typeof orgCustomers)[0]>();
+    let candidateUsernames: string[] = [];
+
+    for (const c of orgCustomers) {
+      const candidates = [
+        ...getRadiusUsernameCandidates(c.username),
+        ...(c.pppoeUsername ? getRadiusUsernameCandidates(c.pppoeUsername) : []),
+      ];
+      for (const cand of candidates) {
+        candidateToCustomerMap.set(cand.toLowerCase(), c);
+        candidateUsernames.push(cand);
+      }
+    }
+
+    // Deduplicate candidate usernames
+    candidateUsernames = Array.from(new Set(candidateUsernames));
+
+    if (filters.username && filters.username.trim()) {
+      const uSearch = filters.username.trim().toLowerCase();
+      candidateUsernames = candidateUsernames.filter((cand) =>
+        cand.toLowerCase().includes(uSearch),
       );
-      if (allowedUsernames.length === 0) {
+      if (candidateUsernames.length === 0) {
         return [];
       }
     }
@@ -253,24 +278,128 @@ export class RadiusService {
     const sessions = await prisma.radAcct.findMany({
       where: {
         acctstoptime: null,
-        username: { in: allowedUsernames },
+        username: { in: candidateUsernames },
       },
       take: 50,
       orderBy: { acctstarttime: 'desc' },
     });
 
-    return sessions.map((s) => ({
-      radacctid: s.radacctid.toString(),
-      acctsessionid: s.acctsessionid,
-      username: s.username,
-      nasipaddress: s.nasipaddress,
-      callingstationid: s.callingstationid,
-      framedipaddress: s.framedipaddress,
-      acctstarttime: s.acctstarttime?.toISOString(),
-      acctsessiontime: Number(s.acctsessiontime || 0),
-      downloadBytes: Number(s.acctoutputoctets || 0),
-      uploadBytes: Number(s.acctinputoctets || 0),
-    }));
+    return sessions.map((s) => {
+      const cust = candidateToCustomerMap.get(s.username.toLowerCase());
+      return {
+        radacctid: s.radacctid.toString(),
+        acctsessionid: s.acctsessionid,
+        username: s.username,
+        nasipaddress: s.nasipaddress,
+        callingstationid: s.callingstationid,
+        framedipaddress: s.framedipaddress,
+        acctstarttime: s.acctstarttime?.toISOString(),
+        acctsessiontime: Number(s.acctsessiontime || 0),
+        downloadBytes: Number(s.acctoutputoctets || 0),
+        uploadBytes: Number(s.acctinputoctets || 0),
+        customerId: cust?.id || null,
+        customer: cust
+          ? {
+              id: cust.id,
+              name: cust.name,
+              customerCode: cust.customerCode,
+              status: cust.status,
+            }
+          : undefined,
+      };
+    });
+  }
+
+  /**
+   * Real-time aggregate subscriber metrics for dashboard.
+   * Calculates COUNT(DISTINCT customer.id) for eligible ACTIVE customers with active sessions.
+   * Excludes duplicate sessions, cross-tenant sessions, and unmapped/unknown sessions.
+   */
+  async getSubscriberSessionMetrics(organizationId: string) {
+    // 1. Fetch all subscribers belonging to this organization (Strict Tenant Isolation)
+    const orgCustomers = await prisma.customer.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        username: true,
+        pppoeUsername: true,
+        status: true,
+      },
+    });
+
+    const totalCustomers = orgCustomers.length;
+    const activeCustomers = orgCustomers.filter((c) => c.status === CustomerStatus.ACTIVE);
+    const activeSubscribers = activeCustomers.length;
+    const suspendedSubscribers = orgCustomers.filter((c) => c.status === CustomerStatus.SUSPENDED).length;
+    const expiredSubscribers = orgCustomers.filter((c) => c.status === CustomerStatus.EXPIRED).length;
+
+    if (activeCustomers.length === 0) {
+      return {
+        totalCustomers,
+        activeSubscribers: 0,
+        onlineSubscribers: 0,
+        offlineSubscribers: 0,
+        concurrencyRate: 0,
+        suspendedSubscribers,
+        expiredSubscribers,
+        activeSessionCount: 0,
+      };
+    }
+
+    // 2. Candidate usernames only for eligible ACTIVE customers
+    const activeCustIdByCandidateUsername = new Map<string, string>();
+    let activeCandidates: string[] = [];
+
+    for (const c of activeCustomers) {
+      const candidates = [
+        ...getRadiusUsernameCandidates(c.username),
+        ...(c.pppoeUsername ? getRadiusUsernameCandidates(c.pppoeUsername) : []),
+      ];
+      for (const cand of candidates) {
+        activeCustIdByCandidateUsername.set(cand.toLowerCase(), c.id);
+        activeCandidates.push(cand);
+      }
+    }
+
+    activeCandidates = Array.from(new Set(activeCandidates));
+
+    // 3. Find active radacct sessions for these candidates
+    const activeSessions = await prisma.radAcct.findMany({
+      where: {
+        acctstoptime: null,
+        username: { in: activeCandidates },
+      },
+      select: {
+        username: true,
+        acctsessionid: true,
+      },
+    });
+
+    // 4. Calculate COUNT(DISTINCT customer.id)
+    const onlineCustomerIds = new Set<string>();
+    for (const s of activeSessions) {
+      const custId = activeCustIdByCandidateUsername.get(s.username.toLowerCase());
+      if (custId) {
+        onlineCustomerIds.add(custId);
+      }
+    }
+
+    const onlineSubscribers = onlineCustomerIds.size;
+    const offlineSubscribers = Math.max(0, activeSubscribers - onlineSubscribers);
+    const concurrencyRate = activeSubscribers > 0
+      ? Number(((onlineSubscribers / activeSubscribers) * 100).toFixed(1))
+      : 0;
+
+    return {
+      totalCustomers,
+      activeSubscribers,
+      onlineSubscribers,
+      offlineSubscribers,
+      concurrencyRate,
+      suspendedSubscribers,
+      expiredSubscribers,
+      activeSessionCount: activeSessions.length,
+    };
   }
 
   async disconnectSession(organizationId: string, sessionId: string) {

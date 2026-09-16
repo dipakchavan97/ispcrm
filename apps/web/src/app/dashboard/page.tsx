@@ -30,12 +30,24 @@ import { MetricSkeleton, TableSkeleton } from '../../components/LoadingSkeleton'
 import { EmptyState } from '../../components/EmptyState';
 import { ConfirmationModal } from '../../components/ConfirmationModal';
 import { useToast } from '../../components/Toast';
+import { LiveRouterTrafficWidget } from '../../components/dashboard/LiveRouterTrafficWidget';
 
 interface InvoiceMetrics {
   totalInvoiced: string;
   totalCollected: string;
   totalOutstanding: string;
   overdueCount: number;
+}
+
+interface SubscriberSessionMetrics {
+  totalCustomers: number;
+  activeSubscribers: number;
+  onlineSubscribers: number;
+  offlineSubscribers: number;
+  concurrencyRate: number;
+  suspendedSubscribers: number;
+  expiredSubscribers: number;
+  activeSessionCount: number;
 }
 
 interface ActiveSession {
@@ -48,10 +60,12 @@ interface ActiveSession {
   acctsessiontime?: number | string;
   acctinputoctets?: number | string;
   acctoutputoctets?: number | string;
+  customerId?: string | null;
   customer?: {
     id?: string;
     name?: string;
     customerCode?: string;
+    status?: string;
   };
 }
 
@@ -64,6 +78,7 @@ interface RouterItem {
   model?: string | null;
   rosVersion?: string | null;
   lastSeen?: string | null;
+  capabilities?: any;
 }
 
 interface AuditItem {
@@ -144,6 +159,17 @@ export default function DashboardPage() {
     refetchInterval: 15000, // Live poll every 15s for ISP NOC dashboard
   });
 
+  // 3a. Fetch Real-Time Distinct Subscriber Metrics (Tenant Enforced)
+  const {
+    data: subscriberMetrics,
+    isLoading: isLoadingSubMetrics,
+    refetch: refetchSubMetrics,
+  } = useQuery<SubscriberSessionMetrics>({
+    queryKey: ['radius-session-metrics'],
+    queryFn: () => apiFetch<SubscriberSessionMetrics>('/radius/sessions/metrics'),
+    refetchInterval: 15000,
+  });
+
   // 4. Fetch MikroTik Routers
   const {
     data: routers = [],
@@ -181,6 +207,7 @@ export default function DashboardPage() {
       );
       setDisconnectSession(null);
       queryClient.invalidateQueries({ queryKey: ['radius-active-sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['radius-session-metrics'] });
     },
     onError: (err: any) => {
       toast.error(err?.message || 'Failed to disconnect session via RFC 3576 PoD', 'Disconnect Error');
@@ -191,19 +218,48 @@ export default function DashboardPage() {
   const handleRefreshAll = () => {
     refetchMetrics();
     refetchCust();
+    refetchSubMetrics();
     refetchSessions();
     refetchRouters();
     toast.info('Refreshed live ISP network and billing metrics', 'Dashboard Updated');
   };
 
-  const totalSubscribers = totalCustomersData?.total ?? 0;
-  const activeSubscribers = activeCustomersData?.total ?? 0;
-  const suspendedSubscribers = suspendedCustomersData?.total ?? 0;
-  const expiredSubscribers = expiredCustomersData?.total ?? 0;
-  const onlineSubscribers = activeSessions.length;
-  const offlineSubscribers = Math.max(0, totalSubscribers - onlineSubscribers);
-  const onlineRouters = routers.filter((r) => r.status === 'ONLINE').length;
-  const offlineRouters = routers.filter((r) => r.status !== 'ONLINE').length;
+  const totalSubscribers = subscriberMetrics?.totalCustomers ?? (totalCustomersData?.total ?? 0);
+  const activeSubscribers = subscriberMetrics?.activeSubscribers ?? (activeCustomersData?.total ?? 0);
+  const suspendedSubscribers = subscriberMetrics?.suspendedSubscribers ?? (suspendedCustomersData?.total ?? 0);
+  const expiredSubscribers = subscriberMetrics?.expiredSubscribers ?? (expiredCustomersData?.total ?? 0);
+
+  // Derive distinct online active CRM customers from activeSessions (fallback or client deduplication):
+  // Multiple sessions belonging to the same customer ID count as 1.
+  // Unknown or unlinked sessions (without active CRM customer) are excluded.
+  const distinctOnlineFromSessions = React.useMemo(() => {
+    const onlineCustIds = new Set<string>();
+    for (const s of activeSessions) {
+      const custId = s.customer?.id || s.customerId;
+      const isEligibleActive = s.customer ? s.customer.status === 'ACTIVE' : Boolean(custId);
+      if (custId && isEligibleActive) {
+        onlineCustIds.add(custId);
+      }
+    }
+    return onlineCustIds.size;
+  }, [activeSessions]);
+
+  const onlineSubscribers = subscriberMetrics?.onlineSubscribers ?? distinctOnlineFromSessions;
+  const offlineSubscribers = subscriberMetrics?.offlineSubscribers ?? Math.max(0, activeSubscribers - onlineSubscribers);
+  const concurrencyRate = subscriberMetrics?.concurrencyRate ?? (
+    activeSubscribers > 0 ? Number(((onlineSubscribers / activeSubscribers) * 100).toFixed(1)) : 0
+  );
+  const onlineRouters = routers.filter(
+    (r) => r.status === 'ONLINE' && !(r.capabilities as any)?.isDegraded
+  ).length;
+  const degradedRouters = routers.filter(
+    (r) =>
+      r.status === 'ONLINE' &&
+      Boolean((r.capabilities as any)?.isDegraded || Number((r.capabilities as any)?.consecutiveFailures || 0) > 0)
+  ).length;
+  const unreachableRouters = routers.filter(
+    (r) => r.status === 'UNREACHABLE' || r.status === 'OFFLINE' || r.status === 'ERROR'
+  ).length;
   const openTickets = ticketStats?.open ?? 0;
 
   const totalDownloadBytes = activeSessions.reduce((sum, s) => sum + Number((s as any).downloadBytes || s.acctoutputoctets || 0), 0);
@@ -236,10 +292,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Top Banner / Operations Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl w-full min-w-0">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-slate-100 tracking-tight">ISP Network & Billing Operations</h1>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">ISP Network & Billing Operations</h1>
             <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Live API
@@ -252,7 +308,7 @@ export default function DashboardPage() {
         <div className="flex items-center flex-wrap gap-2.5">
           <button
             onClick={handleRefreshAll}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors"
             title="Refresh All Metrics"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -260,14 +316,14 @@ export default function DashboardPage() {
           </button>
           <Link
             href="/customers"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all"
           >
             <UserPlus className="h-3.5 w-3.5" />
             <span>New Subscriber</span>
           </Link>
           <Link
             href="/payments"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all"
           >
             <ReceiptText className="h-3.5 w-3.5" />
             <span>Record Payment</span>
@@ -290,13 +346,13 @@ export default function DashboardPage() {
           />
         )}
 
-        {isLoadingSessions ? (
+        {isLoadingSessions && isLoadingSubMetrics ? (
           <MetricSkeleton />
         ) : (
           <MetricCard
             title="Online Subscribers"
             value={onlineSubscribers.toLocaleString('en-IN')}
-            change={`${offlineSubscribers} Offline (${totalSubscribers > 0 ? ((onlineSubscribers / totalSubscribers) * 100).toFixed(1) : 0}% concurrency)`}
+            change={`${offlineSubscribers} Offline (${concurrencyRate.toFixed(1)}% concurrency)`}
             isPositive={true}
             icon={Wifi}
             iconColor="text-emerald-400"
@@ -330,6 +386,9 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Real-Time Live MikroTik Router Traffic Telemetry */}
+      <LiveRouterTrafficWidget />
+
       {/* Network & Helpdesk Telemetry Bar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
@@ -337,8 +396,11 @@ export default function DashboardPage() {
             <p className="text-[11px] font-semibold text-slate-400 uppercase">MikroTik Router Fleet</p>
             <p className="text-lg font-bold text-white mt-1">
               {onlineRouters} <span className="text-xs font-normal text-emerald-400">Online</span>
-              {offlineRouters > 0 && (
-                <span className="text-xs font-normal text-rose-400 ml-2">({offlineRouters} Offline)</span>
+              {degradedRouters > 0 && (
+                <span className="text-xs font-normal text-amber-400 ml-2">({degradedRouters} Retrying)</span>
+              )}
+              {unreachableRouters > 0 && (
+                <span className="text-xs font-normal text-rose-400 ml-2">({unreachableRouters} Unreachable)</span>
               )}
             </p>
             <p className="text-[10px] text-slate-500 font-mono mt-0.5">Total Routers: {routers.length}</p>
@@ -414,7 +476,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-x-auto">
+          <div className="flex-1 overflow-x-auto w-full min-w-0">
             {isLoadingSessions ? (
               <TableSkeleton rows={5} cols={5} />
             ) : isErrorSessions ? (
@@ -423,7 +485,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-slate-300 mb-3">Failed to load active sessions from RADIUS service</p>
                 <button
                   onClick={() => refetchSessions()}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700"
+                  className="px-3.5 py-2 min-h-[36px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700"
                 >
                   Retry Connection
                 </button>
@@ -437,7 +499,7 @@ export default function DashboardPage() {
                 />
               </div>
             ) : (
-              <table className="w-full text-left text-xs">
+              <table className="w-full min-w-[640px] text-left text-xs">
                 <thead className="bg-slate-950/60 text-slate-400 font-medium border-b border-slate-800">
                   <tr>
                     <th className="px-4 py-3">Subscriber</th>
@@ -484,7 +546,7 @@ export default function DashboardPage() {
                               username: session.username,
                             })
                           }
-                          className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-[11px] font-semibold transition-colors"
+                          className="px-2.5 py-1.5 min-h-[32px] rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-[11px] font-semibold transition-colors cursor-pointer"
                           title="Disconnect Session via RFC 3576 PoD"
                         >
                           Disconnect
@@ -545,15 +607,27 @@ export default function DashboardPage() {
                 {routers.map((router) => (
                   <div
                     key={router.id}
-                    className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950/40 border border-slate-800/80"
+                    className="flex flex-col gap-1.5 p-2.5 rounded-lg bg-slate-950/40 border border-slate-800/80"
                   >
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-slate-200 truncate">{router.name}</p>
-                      <p className="text-[10px] text-slate-400 font-mono">
-                        {router.host}:{router.port}
-                      </p>
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-200 truncate">{router.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">
+                          {router.host}:{router.port}
+                        </p>
+                      </div>
+                      <StatusBadge status={router.status} />
                     </div>
-                    <StatusBadge status={router.status} />
+
+                    {((router.capabilities as any)?.cpuLoad !== undefined) && (
+                      <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-1 border-t border-slate-800/50 pt-2">
+                        <span title="CPU Load">CPU: {(router.capabilities as any).cpuLoad}%</span>
+                        <span title="Latency">Lat: {Math.round((router.capabilities as any).latencyMs || 0)}ms</span>
+                        {((router.capabilities as any)?.uptime) && (
+                          <span className="truncate" title="Uptime">Up: {(router.capabilities as any).uptime}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
