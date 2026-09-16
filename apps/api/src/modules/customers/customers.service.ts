@@ -12,6 +12,8 @@ import {
   getRadiusUsernameCandidates,
   toPhysicalRadiusUsername,
   normalizeMacAddress,
+  validateSubscriptionTransition,
+  calculateGracePeriodEndDate,
 } from '@isp-crm/shared';
 import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
 
@@ -31,6 +33,15 @@ export class CustomersService {
   constructor(
     @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
   ) {}
+
+  /**
+   * Helper to ensure valid foreign key for AdminUser in audit/history records
+   */
+  private async sanitizeAdminUserId(adminUserId?: string): Promise<string | null> {
+    if (!adminUserId) return null;
+    const admin = await prisma.adminUser.findUnique({ where: { id: adminUserId } });
+    return admin ? adminUserId : null;
+  }
 
   /**
    * Helper to validate that zoneId and nodeId belong to organization and are consistent.
@@ -1018,9 +1029,61 @@ export class CustomersService {
     }
 
     const oldStatus = customer.status;
-    const activeSub = customer.subscriptions[0];
-    const rateLimit = activeSub?.plan
-      ? generateMikrotikRateLimit(activeSub.plan)
+
+    let targetSub: (typeof customer.subscriptions)[0] | undefined;
+    let targetSubNewStatus: SubscriptionStatus | undefined;
+
+    if (newStatus === CustomerStatus.ACTIVE) {
+      if (customer.subscriptions.length > 0) {
+        // Customer has subscription history; evaluate the latest/current subscription
+        targetSub = customer.subscriptions[0];
+
+        // 1. CANCELLED subscription is terminal and must NEVER be reactivated
+        if (targetSub.status === SubscriptionStatus.CANCELLED) {
+          throw new BadRequestException(
+            `Cannot reactivate customer: subscription '${targetSub.id}' is CANCELLED (terminal state). A new subscription must be provisioned.`,
+          );
+        }
+
+        // 2. Validate FSM transition using validateSubscriptionTransition()
+        try {
+          validateSubscriptionTransition(
+            targetSub.status as SubscriptionStatus,
+            SubscriptionStatus.ACTIVE,
+            'reactivate',
+          );
+        } catch (err: any) {
+          throw new BadRequestException(
+            err?.message || `Invalid subscription transition from ${targetSub.status} to ACTIVE`,
+          );
+        }
+
+        // 3. EXPIRED subscription cannot be reactivated directly; it must be renewed
+        if (targetSub.status === SubscriptionStatus.EXPIRED) {
+          throw new BadRequestException(
+            `Cannot reactivate customer: subscription '${targetSub.id}' is EXPIRED. Please renew the subscription or provision a new one instead.`,
+          );
+        }
+
+        // 4. SUSPENDED subscription check for validity & grace period
+        if (targetSub.status === SubscriptionStatus.SUSPENDED) {
+          const now = new Date();
+          const graceEndDate = calculateGracePeriodEndDate(targetSub.endDate, targetSub.gracePeriodDays);
+          if (now > graceEndDate) {
+            throw new BadRequestException(
+              'Cannot reactivate customer whose subscription validity and grace period have expired. Please renew the subscription instead.',
+            );
+          }
+          targetSubNewStatus = now <= targetSub.endDate ? SubscriptionStatus.ACTIVE : SubscriptionStatus.GRACE;
+        } else if (targetSub.status === SubscriptionStatus.PENDING) {
+          targetSubNewStatus = SubscriptionStatus.ACTIVE;
+        }
+      }
+    }
+
+    const rateSub = targetSub || customer.subscriptions.find((s) => s.status === SubscriptionStatus.ACTIVE);
+    const rateLimit = rateSub?.plan
+      ? generateMikrotikRateLimit(rateSub.plan)
       : '50M/50M';
 
     const result = await prisma.$transaction(async (tx) => {
@@ -1119,11 +1182,24 @@ export class CustomersService {
           data: replyAttributes,
         });
 
-        // Mark subscription active
-        if (activeSub) {
+        // Mark subscription active if status change is required
+        if (targetSub && targetSubNewStatus && targetSub.status !== targetSubNewStatus) {
           await tx.subscription.update({
-            where: { id: activeSub.id },
-            data: { status: SubscriptionStatus.ACTIVE },
+            where: { id: targetSub.id },
+            data: { status: targetSubNewStatus },
+          });
+
+          const validAdminUserId = await this.sanitizeAdminUserId(adminUserId);
+          await tx.subscriptionHistory.create({
+            data: {
+              organizationId,
+              subscriptionId: targetSub.id,
+              fromStatus: targetSub.status,
+              toStatus: targetSubNewStatus,
+              action: targetSub.status === SubscriptionStatus.PENDING ? 'ACTIVATE' : 'REACTIVATE',
+              reason: notes || 'Customer reactivated',
+              adminUserId: validAdminUserId,
+            },
           });
         }
       } else if (newStatus === CustomerStatus.SUSPENDED) {
@@ -1158,10 +1234,29 @@ export class CustomersService {
         }
 
         // Suspend subscriptions
-        await tx.subscription.updateMany({
+        const subsToSuspend = await tx.subscription.findMany({
           where: { customerId: customer.id, status: SubscriptionStatus.ACTIVE },
-          data: { status: SubscriptionStatus.SUSPENDED },
         });
+        if (subsToSuspend.length > 0) {
+          await tx.subscription.updateMany({
+            where: { customerId: customer.id, status: SubscriptionStatus.ACTIVE },
+            data: { status: SubscriptionStatus.SUSPENDED },
+          });
+          const validAdminUserId = await this.sanitizeAdminUserId(adminUserId);
+          for (const s of subsToSuspend) {
+            await tx.subscriptionHistory.create({
+              data: {
+                organizationId,
+                subscriptionId: s.id,
+                fromStatus: SubscriptionStatus.ACTIVE,
+                toStatus: SubscriptionStatus.SUSPENDED,
+                action: 'SUSPEND',
+                reason: notes || 'Customer suspended',
+                adminUserId: validAdminUserId,
+              },
+            });
+          }
+        }
       } else if (newStatus === CustomerStatus.TERMINATED) {
         // Invalidate radcheck credentials for all candidate usernames
         await tx.radCheck.deleteMany({
@@ -1203,6 +1298,7 @@ export class CustomersService {
             },
             data: { status: SubscriptionStatus.CANCELLED },
           });
+          const validAdminUserId = await this.sanitizeAdminUserId(adminUserId);
           for (const s of subsToCancel) {
             await tx.subscriptionHistory.create({
               data: {
@@ -1212,7 +1308,7 @@ export class CustomersService {
                 toStatus: SubscriptionStatus.CANCELLED,
                 action: 'CANCEL',
                 reason: notes || 'Customer terminated/decommissioned',
-                adminUserId: adminUserId || null,
+                adminUserId: validAdminUserId,
               },
             });
           }
@@ -1272,7 +1368,7 @@ export class CustomersService {
           .queueCoaJob({
             organizationId,
             customerId: customer.id,
-            subscriptionId: activeSub?.id,
+            subscriptionId: (targetSub || customer.subscriptions[0])?.id,
             username: targetUsername,
             action: newStatus === CustomerStatus.TERMINATED ? 'TERMINATE' : CoaAction.SUSPEND,
             requestType: CoaRequestType.DISCONNECT,
@@ -1288,7 +1384,7 @@ export class CustomersService {
           .queueCoaJob({
             organizationId,
             customerId: customer.id,
-            subscriptionId: activeSub?.id,
+            subscriptionId: (targetSub || customer.subscriptions[0])?.id,
             username: toPhysicalRadiusUsername(customer.username),
             action: CoaAction.REACTIVATE,
             requestType: CoaRequestType.COA,
