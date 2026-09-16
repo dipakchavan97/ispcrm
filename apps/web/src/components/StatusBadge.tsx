@@ -7,31 +7,31 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
-  const normalized = status.toUpperCase();
+  const normalized = (status || '').toUpperCase();
 
-  let styles = 'bg-slate-800 text-slate-300 border-slate-700';
+  let styles = 'bg-[#F1F5F9] text-[#475569] border-[#CBD5E1]';
 
   if (normalized === 'ACTIVE' || normalized === 'PAID' || normalized === 'ONLINE' || normalized === 'SUCCESS' || normalized === 'RESOLVED') {
-    styles = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+    styles = 'bg-[#ECFDF5] text-[#047857] border-[#A7F3D0]';
   } else if (normalized === 'LEAD' || normalized === 'ISSUED' || normalized === 'OPEN') {
-    styles = 'bg-sky-500/10 text-sky-400 border-sky-500/30';
-  } else if (normalized === 'PENDING' || normalized === 'PARTIALLY_PAID' || normalized === 'MEDIUM') {
-    styles = 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+    styles = 'bg-[#F0F9FF] text-[#0369A1] border-[#BAE6FD]';
+  } else if (normalized === 'MAINTENANCE' || normalized === 'PENDING' || normalized === 'PARTIALLY_PAID' || normalized === 'MEDIUM' || normalized === 'ONBOARDING') {
+    styles = 'bg-[#FFFBEB] text-[#B45309] border-[#FDE68A]';
   } else if (normalized === 'IN_PROGRESS' || normalized === 'GRACE' || normalized === 'HIGH') {
-    styles = 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+    styles = 'bg-[#FAF5FF] text-[#7E22CE] border-[#E9D5FF]';
   } else if (normalized === 'SUSPENDED' || normalized === 'UNPAID' || normalized === 'OFFLINE' || normalized === 'OVERDUE' || normalized === 'FAILED' || normalized === 'URGENT') {
-    styles = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+    styles = 'bg-[#FFF1F2] text-[#BE123C] border-[#FECDD3]';
   } else if (normalized === 'EXPIRED' || normalized === 'REFUNDED') {
-    styles = 'bg-orange-500/10 text-orange-400 border-orange-500/20';
-  } else if (normalized === 'DRAFT' || normalized === 'LOW') {
-    styles = 'bg-slate-800 text-slate-400 border-slate-600';
+    styles = 'bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]';
+  } else if (normalized === 'INACTIVE' || normalized === 'DRAFT' || normalized === 'LOW') {
+    styles = 'bg-[#F1F5F9] text-[#475569] border-[#CBD5E1]';
   } else if (normalized === 'TERMINATED' || normalized === 'CANCELLED' || normalized === 'CLOSED') {
-    styles = 'bg-slate-800/80 text-slate-400 border-slate-700 line-through';
+    styles = 'bg-[#F1F5F9] text-[#94A3B8] border-[#E2E8F0] line-through';
   }
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${styles}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold border shadow-xs ${styles}`}
     >
       {normalized}
     </span>

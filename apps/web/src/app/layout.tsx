@@ -1,12 +1,9 @@
 import React from 'react';
 import type { Metadata } from 'next';
 import './globals.css';
-import { Sidebar } from '../components/Sidebar';
-import { Header } from '../components/Header';
-
 import { QueryProvider } from '../lib/query-provider';
 import { ToastProvider } from '../components/Toast';
-
+import { ThemeProvider } from '../lib/theme-provider';
 import { AppShell } from '../components/AppShell';
 
 export const metadata: Metadata = {
@@ -20,11 +17,31 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-[#0b1329] text-slate-100 min-h-screen">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var saved = localStorage.getItem('ispcrm_theme');
+                  var theme = (saved === 'dark' || saved === 'colorful') ? saved : 'light';
+                  document.documentElement.classList.remove('dark', 'light', 'colorful');
+                  document.documentElement.classList.add(theme);
+                } catch (e) {
+                  document.documentElement.classList.add('light');
+                }
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-screen transition-colors duration-200">
         <QueryProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <ThemeProvider>
+              <AppShell>{children}</AppShell>
+            </ThemeProvider>
           </ToastProvider>
         </QueryProvider>
       </body>
