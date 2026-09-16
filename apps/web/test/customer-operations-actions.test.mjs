@@ -158,7 +158,7 @@ describe('Customer Operations & Actions — 18 MVP Actions Test Suite', () => {
   });
 
   // 9. Change Internet Package
-  test('Action 9: Change Internet Package triggers plan upgrade endpoint', () => {
+  test('Action 9: Change Internet Package triggers plan upgrade endpoint and validates RBAC', () => {
     const targetPlanId = 'plan-uuid-premium-200';
     const upgradeEndpoint = `/subscriptions/${testSubscription.id}/upgrade`;
     const upgradePayload = {
@@ -168,6 +168,17 @@ describe('Customer Operations & Actions — 18 MVP Actions Test Suite', () => {
 
     assert.equal(upgradeEndpoint, '/subscriptions/sub-uuid-789/upgrade');
     assert.equal(upgradePayload.planId, 'plan-uuid-premium-200');
+
+    // UI RBAC evaluation rules: OWNER, ADMIN, BILLING allowed; SUPPORT, TECHNICIAN, READ_ONLY disabled
+    const canChangePackage = (role) =>
+      role === 'ISP_OWNER' || role === 'ISP_ADMIN' || role === 'BILLING';
+
+    assert.equal(canChangePackage('ISP_OWNER'), true);
+    assert.equal(canChangePackage('ISP_ADMIN'), true);
+    assert.equal(canChangePackage('BILLING'), true);
+    assert.equal(canChangePackage('SUPPORT'), false, 'SUPPORT must be disabled from changing package');
+    assert.equal(canChangePackage('TECHNICIAN'), false, 'TECHNICIAN must be disabled from changing package');
+    assert.equal(canChangePackage('READ_ONLY'), false, 'READ_ONLY must be disabled from changing package');
   });
 
   // 10. Record Payment

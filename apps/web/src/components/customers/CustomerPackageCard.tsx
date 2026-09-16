@@ -18,6 +18,7 @@ interface CustomerPackageCardProps {
   subscription?: any;
   onRenew: () => void;
   onChangePlan: () => void;
+  canChangePlan?: boolean;
   onOverrideSpeed: () => void;
   onSuspend?: () => void;
   onReactivate?: () => void;
@@ -28,6 +29,7 @@ export function CustomerPackageCard({
   subscription,
   onRenew,
   onChangePlan,
+  canChangePlan = true,
   onOverrideSpeed,
 }: CustomerPackageCardProps) {
   if (!subscription) {
@@ -43,14 +45,16 @@ export function CustomerPackageCard({
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
             This subscriber currently does not have an active internet subscription.
           </p>
-          <button
-            type="button"
-            onClick={onChangePlan}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all min-h-[40px]"
-          >
-            <Zap className="h-4 w-4" />
-            <span>Assign Internet Plan</span>
-          </button>
+          {canChangePlan && (
+            <button
+              type="button"
+              onClick={onChangePlan}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all min-h-[40px]"
+            >
+              <Zap className="h-4 w-4" />
+              <span>Assign Internet Plan</span>
+            </button>
+          )}
         </div>
       </div>
     );
@@ -186,14 +190,16 @@ export function CustomerPackageCard({
             <span>Renew Package</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onChangePlan}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-colors min-h-[40px]"
-          >
-            <Zap className="h-4 w-4 text-blue-400" />
-            <span>Change Package</span>
-          </button>
+          {canChangePlan && (
+            <button
+              type="button"
+              onClick={onChangePlan}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition-colors min-h-[40px]"
+            >
+              <Zap className="h-4 w-4 text-blue-400" />
+              <span>Change Package</span>
+            </button>
+          )}
         </div>
 
         <button

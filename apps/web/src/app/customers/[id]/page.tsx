@@ -33,7 +33,7 @@ import { apiFetch, downloadInvoicePdf } from '../../../lib/api';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
 import { CardSkeleton } from '../../../components/LoadingSkeleton';
 import { useToast } from '../../../components/Toast';
-import { CustomerStatus } from '@isp-crm/shared';
+import { CustomerStatus, UserRole } from '@isp-crm/shared';
 
 // Modular Customer Profile Components
 import { CustomerHeader } from '../../../components/customers/CustomerHeader';
@@ -272,6 +272,17 @@ export default function CustomerDetailPage() {
     queryKey: ['plans'],
     queryFn: () => apiFetch<any[]>('/plans'),
   });
+
+  // Current Staff User Profile for RBAC
+  const { data: currentUser } = useQuery<any>({
+    queryKey: ['auth-me'],
+    queryFn: () => apiFetch<any>('/auth/me'),
+  });
+
+  const canChangePackage = useMemo(() => {
+    const role = currentUser?.role;
+    return role === UserRole.ISP_OWNER || role === UserRole.ISP_ADMIN || role === UserRole.BILLING;
+  }, [currentUser?.role]);
 
   // Active Internet Subscription
   const activeSubscription = useMemo(() => {
@@ -1052,6 +1063,7 @@ export default function CustomerDetailPage() {
                   subscription={activeSubscription}
                   onRenew={handleOpenRenew}
                   onChangePlan={() => setIsChangePlanModalOpen(true)}
+                  canChangePlan={canChangePackage}
                   onOverrideSpeed={() => setIsSpeedOverrideModalOpen(true)}
                 />
 
@@ -1194,6 +1206,7 @@ export default function CustomerDetailPage() {
                 subscription={activeSubscription}
                 onRenew={handleOpenRenew}
                 onChangePlan={() => setIsChangePlanModalOpen(true)}
+                canChangePlan={canChangePackage}
                 onOverrideSpeed={() => setIsSpeedOverrideModalOpen(true)}
               />
               <CustomerPackageHistoryCard subscriptions={customer.subscriptions || []} />
@@ -1299,6 +1312,7 @@ export default function CustomerDetailPage() {
         onChangePassword={() => setIsPasswordModalOpen(true)}
         onRenewPackage={handleOpenRenew}
         onChangePackage={() => setIsChangePlanModalOpen(true)}
+        canChangePackage={canChangePackage}
         onOverrideSpeed={() => setIsSpeedOverrideModalOpen(true)}
         onGenerateCaf={() => setIsCafModalOpen(true)}
         onGeneratePaymentLink={handleGeneratePaymentLink}
@@ -1435,6 +1449,13 @@ export default function CustomerDetailPage() {
                 </select>
               </div>
 
+              {!canChangePackage && (
+                <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/30 flex items-center gap-2 text-amber-300 text-[11px]">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+                  <span>Changing internet package requires ISP Owner, Admin, or Billing role.</span>
+                </div>
+              )}
+
               <p className="text-[11px] text-slate-400 leading-relaxed bg-blue-950/30 border border-blue-800/40 p-3 rounded-xl">
                 Switching package immediately updates FreeRADIUS Mikrotik-Rate-Limit attributes and
                 triggers an RFC 3576 CoA bandwidth re-rate.
@@ -1451,8 +1472,9 @@ export default function CustomerDetailPage() {
               </button>
               <button
                 type="button"
-                disabled={!selectedNewPlanId || changePlanMutation.isPending || assignPlanMutation.isPending}
+                disabled={!canChangePackage || !selectedNewPlanId || changePlanMutation.isPending || assignPlanMutation.isPending}
                 onClick={() => {
+                  if (!canChangePackage) return;
                   if (activeSubscription?.id && selectedNewPlanId) {
                     changePlanMutation.mutate({
                       subId: activeSubscription.id,

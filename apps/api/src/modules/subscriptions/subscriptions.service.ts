@@ -644,18 +644,24 @@ export class SubscriptionsService {
         },
       });
 
-      if (sub.customer) {
+      if (sub.customer?.username) {
+        const candidates = getRadiusUsernameCandidates(sub.customer.username);
         await tx.radReply.deleteMany({
-          where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
-        });
-        await tx.radReply.create({
-          data: {
-            username: sub.customer.username,
+          where: {
+            username: { in: candidates },
             attribute: 'Mikrotik-Rate-Limit',
-            op: '=',
-            value: rateLimit,
           },
         });
+        for (const u of candidates) {
+          await tx.radReply.create({
+            data: {
+              username: u,
+              attribute: 'Mikrotik-Rate-Limit',
+              op: '=',
+              value: rateLimit,
+            },
+          });
+        }
       }
 
       // Automatically generate invoice for the plan upgrade
@@ -673,6 +679,30 @@ export class SubscriptionsService {
           unitPrice: newPlan.price,
         });
       }
+
+      // General Audit Log for plan upgrade / change
+      await tx.auditLog.create({
+        data: {
+          organizationId,
+          adminUserId: finalAdminUserId,
+          action: AuditAction.UPDATE,
+          entityType: 'SUBSCRIPTION',
+          entityId: updated.id,
+          details: {
+            action: 'PLAN_CHANGE',
+            subAction: 'UPGRADE',
+            oldPlanId: sub.planId,
+            newPlanId: newPlan.id,
+            oldPlanName: sub.plan?.name || '',
+            newPlanName: newPlan.name,
+            oldPrice: sub.price,
+            newPrice: newPlan.price,
+            oldBandwidth: sub.plan ? `${sub.plan.uploadSpeedMbps}M/${sub.plan.downloadSpeedMbps}M` : null,
+            newBandwidth: `${newPlan.uploadSpeedMbps}M/${newPlan.downloadSpeedMbps}M`,
+            invoiceId: invoice?.id || null,
+          },
+        },
+      });
 
       return {
         ...updated,
@@ -787,18 +817,24 @@ export class SubscriptionsService {
         },
       });
 
-      if (sub.customer) {
+      if (sub.customer?.username) {
+        const candidates = getRadiusUsernameCandidates(sub.customer.username);
         await tx.radReply.deleteMany({
-          where: { username: sub.customer.username, attribute: 'Mikrotik-Rate-Limit' },
-        });
-        await tx.radReply.create({
-          data: {
-            username: sub.customer.username,
+          where: {
+            username: { in: candidates },
             attribute: 'Mikrotik-Rate-Limit',
-            op: '=',
-            value: rateLimit,
           },
         });
+        for (const u of candidates) {
+          await tx.radReply.create({
+            data: {
+              username: u,
+              attribute: 'Mikrotik-Rate-Limit',
+              op: '=',
+              value: rateLimit,
+            },
+          });
+        }
       }
 
       // Automatically generate invoice for the plan downgrade if billable
@@ -816,6 +852,30 @@ export class SubscriptionsService {
           unitPrice: newPlan.price,
         });
       }
+
+      // General Audit Log for plan downgrade / change
+      await tx.auditLog.create({
+        data: {
+          organizationId,
+          adminUserId: finalAdminUserId,
+          action: AuditAction.UPDATE,
+          entityType: 'SUBSCRIPTION',
+          entityId: updated.id,
+          details: {
+            action: 'PLAN_CHANGE',
+            subAction: 'DOWNGRADE',
+            oldPlanId: sub.planId,
+            newPlanId: newPlan.id,
+            oldPlanName: sub.plan?.name || '',
+            newPlanName: newPlan.name,
+            oldPrice: sub.price,
+            newPrice: newPlan.price,
+            oldBandwidth: sub.plan ? `${sub.plan.uploadSpeedMbps}M/${sub.plan.downloadSpeedMbps}M` : null,
+            newBandwidth: `${newPlan.uploadSpeedMbps}M/${newPlan.downloadSpeedMbps}M`,
+            invoiceId: invoice?.id || null,
+          },
+        },
+      });
 
       return {
         ...updated,

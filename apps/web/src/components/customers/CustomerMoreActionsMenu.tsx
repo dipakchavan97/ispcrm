@@ -41,6 +41,7 @@ interface CustomerMoreActionsMenuProps {
   onChangePassword: () => void;
   onRenewPackage: () => void;
   onChangePackage: () => void;
+  canChangePackage?: boolean;
   onOverrideSpeed: () => void;
   onGenerateCaf: () => void;
   onGeneratePaymentLink: () => void;
@@ -69,6 +70,7 @@ export function CustomerMoreActionsMenu({
   onChangePassword,
   onRenewPackage,
   onChangePackage,
+  canChangePackage = true,
   onOverrideSpeed,
   onGenerateCaf,
   onGeneratePaymentLink,
@@ -295,14 +297,22 @@ export function CustomerMoreActionsMenu({
               <button
                 type="button"
                 onClick={() => handleAction(onChangePackage)}
-                className="flex items-center gap-3 p-3 rounded-xl bg-slate-950/60 hover:bg-slate-800/80 border border-slate-800 text-slate-200 text-left transition-all min-h-[44px]"
+                disabled={!canChangePackage}
+                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all min-h-[44px] ${
+                  canChangePackage
+                    ? 'bg-slate-950/60 hover:bg-slate-800/80 border-slate-800 text-slate-200'
+                    : 'bg-slate-950/30 border-slate-900 text-slate-500 cursor-not-allowed opacity-50'
+                }`}
+                title={canChangePackage ? undefined : 'Restricted: Requires ISP Owner, Admin, or Billing role'}
               >
-                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 shrink-0">
+                <div className={`p-2 rounded-lg shrink-0 ${canChangePackage ? 'bg-blue-500/10 text-blue-400' : 'bg-slate-800 text-slate-600'}`}>
                   <Zap className="h-4 w-4" />
                 </div>
                 <div>
-                  <div className="font-semibold text-slate-200">Change Internet Package</div>
-                  <div className="text-[11px] text-slate-400">Upgrade or switch to a different plan tier</div>
+                  <div className={`font-semibold ${canChangePackage ? 'text-slate-200' : 'text-slate-500'}`}>Change Internet Package</div>
+                  <div className="text-[11px] text-slate-500">
+                    {canChangePackage ? 'Upgrade or switch to a different plan tier' : 'Restricted (Owner/Admin/Billing only)'}
+                  </div>
                 </div>
               </button>
 
