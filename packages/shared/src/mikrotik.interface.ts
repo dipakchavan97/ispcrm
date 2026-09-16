@@ -1,4 +1,4 @@
-import { RouterStatus, RouterConnectionMethod, RouterApiMethod } from './enums';
+import { RouterStatus, RouterConnectionMethod, RouterApiMethod, RouterOnboardingStatus } from './enums';
 
 export interface RouterCapabilities {
   rest: boolean;
@@ -17,6 +17,8 @@ export interface RouterConnectionConfig {
   connectionMethod?: RouterConnectionMethod;
   apiMethod?: RouterApiMethod;
   vpnIp?: string;
+  organizationId?: string;
+  routerId?: string;
 }
 
 export interface RouterIdentity {
@@ -81,6 +83,7 @@ export interface TestConnectionResult {
   minorVersion?: number;
   apiMethodUsed?: 'REST_API' | 'BINARY_API' | 'MOCK';
   capabilities?: RouterCapabilities;
+  systemResources?: SystemResources;
 }
 
 export interface MikrotikClient {
@@ -144,6 +147,7 @@ export interface RouterDto {
   port: number;
   username: string;
   status: RouterStatus;
+  onboardingStatus?: RouterOnboardingStatus | string;
   lastSeen?: Date | string | null;
   model?: string | null;
   rosVersion?: string | null;
