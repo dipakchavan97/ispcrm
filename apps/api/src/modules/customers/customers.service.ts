@@ -8,6 +8,7 @@ import {
   generateMikrotikRateLimit,
   CoaAction,
   CoaRequestType,
+  RouterConnectionMethod,
   getRadiusUsernameCandidates,
   toPhysicalRadiusUsername,
   normalizeMacAddress,
@@ -21,6 +22,8 @@ export interface CustomerListFilters {
   status?: string;
   area?: string;
   city?: string;
+  zoneId?: string;
+  nodeId?: string;
 }
 
 @Injectable()
@@ -28,6 +31,48 @@ export class CustomersService {
   constructor(
     @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
   ) {}
+
+  /**
+   * Helper to validate that zoneId and nodeId belong to organization and are consistent.
+   * If nodeId is provided without zoneId, resolves and derives zoneId from the node.
+   */
+  private async validateCustomerZoneAndNode(
+    organizationId: string,
+    zoneIdInput?: string | null,
+    nodeIdInput?: string | null,
+  ): Promise<{ zoneId: string | null; nodeId: string | null }> {
+    let resolvedZoneId = zoneIdInput ? zoneIdInput.trim() : null;
+    let resolvedNodeId = nodeIdInput ? nodeIdInput.trim() : null;
+
+    if (resolvedNodeId) {
+      const node = await prisma.node.findFirst({
+        where: { id: resolvedNodeId, organizationId },
+      });
+      if (!node) {
+        throw new NotFoundException('Selected node not found in your organization');
+      }
+
+      if (resolvedZoneId) {
+        if (node.zoneId !== resolvedZoneId) {
+          throw new BadRequestException('Selected node does not belong to the selected zone');
+        }
+      } else {
+        resolvedZoneId = node.zoneId;
+      }
+    }
+
+    if (resolvedZoneId) {
+      const zone = await prisma.zone.findFirst({
+        where: { id: resolvedZoneId, organizationId },
+      });
+      if (!zone) {
+        throw new NotFoundException('Selected zone not found in your organization');
+      }
+    }
+
+    return { zoneId: resolvedZoneId, nodeId: resolvedNodeId };
+  }
+
   /**
    * List subscribers strictly scoped to tenant organization with server-side pagination & filtering
    */
@@ -46,6 +91,12 @@ export class CustomersService {
     }
     if (filters.city) {
       where.city = { contains: filters.city, mode: 'insensitive' };
+    }
+    if (filters.zoneId) {
+      where.zoneId = filters.zoneId;
+    }
+    if (filters.nodeId) {
+      where.nodeId = filters.nodeId;
     }
 
     if (filters.search) {
@@ -74,6 +125,8 @@ export class CustomersService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
+          zone: { select: { id: true, name: true } },
+          node: { select: { id: true, name: true } },
           subscriptions: {
             take: 1,
             orderBy: { createdAt: 'desc' },
@@ -183,7 +236,14 @@ export class CustomersService {
       }
     }
 
-    // 4. Atomically create Customer, Subscription, FreeRADIUS credentials, and AuditLog
+    // 4. Validate optional Zone & Node hierarchy
+    const { zoneId, nodeId } = await this.validateCustomerZoneAndNode(
+      organizationId,
+      data.zoneId,
+      data.nodeId,
+    );
+
+    // 5. Atomically create Customer, Subscription, FreeRADIUS credentials, and AuditLog
     return prisma.$transaction(async (tx) => {
       const customer = await tx.customer.create({
         data: {
@@ -200,6 +260,8 @@ export class CustomersService {
           city: data.city || null,
           state: data.state || null,
           pincode: data.pincode || null,
+          zoneId,
+          nodeId,
           username,
           pppoeUsername: username,
           pppoePassword,
@@ -208,6 +270,10 @@ export class CustomersService {
           status,
           installationDate: data.installationDate ? new Date(data.installationDate) : null,
           notes: data.notes || null,
+        },
+        include: {
+          zone: { select: { id: true, name: true } },
+          node: { select: { id: true, name: true } },
         },
       });
 
@@ -304,6 +370,8 @@ export class CustomersService {
             mobile: customer.mobile,
             status: customer.status,
             macAddress: customer.macAddress,
+            zoneId: customer.zoneId,
+            nodeId: customer.nodeId,
           },
         },
       });
@@ -319,6 +387,8 @@ export class CustomersService {
     const customer = await prisma.customer.findFirst({
       where: { id, organizationId },
       include: {
+        zone: { select: { id: true, name: true } },
+        node: { select: { id: true, name: true } },
         subscriptions: {
           orderBy: { createdAt: 'desc' },
           include: { plan: true },
@@ -382,64 +452,186 @@ export class CustomersService {
       throw new NotFoundException(`Customer '${id}' not found in your organization`);
     }
 
-    // Check customerCode uniqueness if changing
-    if (data.customerCode && data.customerCode !== existing.customerCode) {
-      const codeExists = await prisma.customer.findUnique({
-        where: {
-          organizationId_customerCode: {
-            organizationId,
-            customerCode: data.customerCode,
-          },
-        },
-      });
-      if (codeExists) {
-        throw new ConflictException(`Customer code '${data.customerCode}' is already taken`);
-      }
-    }
-
-    // Check username uniqueness if changing
-    if (data.username && data.username !== existing.username) {
-      const usernameExists = await prisma.customer.findUnique({
-        where: { username: data.username },
-      });
-      if (usernameExists) {
-        throw new ConflictException(`Username '${data.username}' is already taken`);
-      }
-    }
-
     const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.customerCode !== undefined) updateData.customerCode = data.customerCode;
-    if (data.mobile !== undefined) {
-      updateData.mobile = data.mobile;
-      updateData.phone = data.mobile;
+
+    // 1. Personal Information Validation
+    if (data.name !== undefined) {
+      const n = (data.name || '').trim();
+      if (!n || n.length < 2) {
+        throw new BadRequestException('Customer name must be at least 2 characters');
+      }
+      updateData.name = n;
     }
-    if (data.email !== undefined) updateData.email = data.email || null;
-    if (data.address !== undefined) {
-      updateData.address = data.address;
-      updateData.installationAddress = data.address;
+
+    if (data.customerCode !== undefined) {
+      const code = (data.customerCode || '').trim();
+      if (!code) {
+        throw new BadRequestException('Customer code cannot be empty');
+      }
+      if (code !== existing.customerCode) {
+        const codeExists = await prisma.customer.findUnique({
+          where: {
+            organizationId_customerCode: {
+              organizationId,
+              customerCode: code,
+            },
+          },
+        });
+        if (codeExists) {
+          throw new ConflictException(`Customer code '${code}' is already assigned to another customer`);
+        }
+        updateData.customerCode = code;
+      }
     }
-    if (data.area !== undefined) updateData.area = data.area || null;
-    if (data.city !== undefined) updateData.city = data.city || null;
-    if (data.state !== undefined) updateData.state = data.state || null;
-    if (data.pincode !== undefined) updateData.pincode = data.pincode || null;
-    if (data.notes !== undefined) updateData.notes = data.notes || null;
+
     if (data.installationDate !== undefined) {
       updateData.installationDate = data.installationDate ? new Date(data.installationDate) : null;
     }
-    if (data.staticIp !== undefined) updateData.staticIp = data.staticIp || null;
 
-    if (data.username !== undefined) {
-      updateData.username = data.username;
-      updateData.pppoeUsername = data.username;
+    // 2. Contact Information Validation
+    if (data.mobile !== undefined) {
+      const m = (data.mobile || '').trim();
+      if (m && m.length < 10) {
+        throw new BadRequestException('Valid primary mobile number of at least 10 digits is required');
+      }
+      updateData.mobile = m;
+      if (data.phone === undefined) {
+        updateData.phone = m;
+      }
     }
+    if (data.phone !== undefined) {
+      updateData.phone = data.phone ? data.phone.trim() : (updateData.mobile || existing.mobile);
+    }
+    if (data.alternatePhone !== undefined) {
+      updateData.alternatePhone = data.alternatePhone && data.alternatePhone.trim() !== '' ? data.alternatePhone.trim() : null;
+    }
+    if (data.email !== undefined) {
+      const em = data.email ? data.email.trim() : '';
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        throw new BadRequestException('Invalid email address format');
+      }
+      updateData.email = em || null;
+    }
+
+    // 3. Address Information
+    if (data.installationAddress !== undefined) {
+      updateData.installationAddress = data.installationAddress ? data.installationAddress.trim() : null;
+    }
+    if (data.address !== undefined) {
+      updateData.address = data.address ? data.address.trim() : '';
+      if (data.installationAddress === undefined && !existing.installationAddress) {
+        updateData.installationAddress = updateData.address;
+      }
+    }
+    if (data.area !== undefined) updateData.area = data.area ? data.area.trim() : null;
+    if (data.city !== undefined) updateData.city = data.city ? data.city.trim() : null;
+    if (data.state !== undefined) updateData.state = data.state ? data.state.trim() : null;
+    if (data.pincode !== undefined) updateData.pincode = data.pincode ? data.pincode.trim() : null;
+
+    // 4. Billing & KYC
+    if (data.aadhaarNumber !== undefined) {
+      const a = data.aadhaarNumber ? data.aadhaarNumber.toString().replace(/\D/g, '') : '';
+      if (a && a.length !== 12) {
+        throw new BadRequestException('Aadhaar number must be exactly 12 digits');
+      }
+      updateData.aadhaarNumber = a || null;
+    }
+
+    if (data.gstin !== undefined) {
+      const g = data.gstin ? data.gstin.trim().toUpperCase() : '';
+      if (g && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g)) {
+        throw new BadRequestException('Invalid GSTIN format (must be 15 characters, e.g. 27AAAAA0000A1Z5)');
+      }
+      updateData.gstin = g || null;
+    }
+
+    // 5. Zone & Node Assignment
+    if (data.zoneId !== undefined || data.nodeId !== undefined) {
+      let targetZoneId = data.zoneId !== undefined ? (data.zoneId || null) : existing.zoneId;
+      let targetNodeId = data.nodeId !== undefined ? (data.nodeId || null) : existing.nodeId;
+
+      if ((data.zoneId === null || data.zoneId === '') && data.nodeId === undefined) {
+        targetNodeId = null;
+      }
+
+      const validated = await this.validateCustomerZoneAndNode(
+        organizationId,
+        targetZoneId,
+        targetNodeId,
+      );
+
+      if (data.zoneId !== undefined || targetNodeId === null) {
+        updateData.zoneId = validated.zoneId;
+      } else if (targetNodeId && validated.zoneId !== existing.zoneId) {
+        updateData.zoneId = validated.zoneId;
+      }
+
+      if (data.nodeId !== undefined || targetNodeId === null) {
+        updateData.nodeId = validated.nodeId;
+      }
+    }
+
+    // 6. Account Settings & Notes
+    if (data.notes !== undefined) {
+      updateData.notes = data.notes ? data.notes.trim() : null;
+    }
+
+    let hasStatusChange = false;
+    if (data.status !== undefined && data.status !== existing.status) {
+      const validStatuses = Object.values(CustomerStatus);
+      if (!validStatuses.includes(data.status)) {
+        throw new BadRequestException(`Invalid customer status '${data.status}'`);
+      }
+      updateData.status = data.status;
+      hasStatusChange = true;
+    }
+
+    // 6. PPPoE Identity & Network Credentials
+    const requestedUsername = data.username !== undefined ? data.username : data.pppoeUsername;
+    let isRenamed = false;
+    if (requestedUsername !== undefined) {
+      const un = requestedUsername.trim();
+      if (!un || un.length < 2) {
+        throw new BadRequestException('PPPoE username must be at least 2 characters');
+      }
+      if (!/^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/.test(un)) {
+        throw new BadRequestException('PPPoE username contains invalid characters');
+      }
+      if (un !== existing.username) {
+        const usernameExists = await prisma.customer.findUnique({
+          where: { username: un },
+        });
+        if (usernameExists) {
+          throw new ConflictException(`PPPoE username '${un}' is already assigned to another customer`);
+        }
+        updateData.username = un;
+        updateData.pppoeUsername = un;
+        isRenamed = true;
+      }
+    }
+
+    let hasPasswordChange = false;
     if (
       data.pppoePassword !== undefined &&
       data.pppoePassword !== null &&
       typeof data.pppoePassword === 'string' &&
       data.pppoePassword.trim() !== ''
     ) {
-      updateData.pppoePassword = data.pppoePassword.trim();
+      const pass = data.pppoePassword.trim();
+      if (pass.length < 4) {
+        throw new BadRequestException('PPPoE password must be at least 4 characters');
+      }
+      updateData.pppoePassword = pass;
+      hasPasswordChange = true;
+    }
+
+    let hasStaticIpChange = false;
+    if (data.staticIp !== undefined) {
+      const ip = data.staticIp ? data.staticIp.trim() : '';
+      updateData.staticIp = ip || null;
+      if (updateData.staticIp !== existing.staticIp) {
+        hasStaticIpChange = true;
+      }
     }
 
     let hasMacChange = false;
@@ -454,8 +646,23 @@ export class CustomersService {
         } catch (err: any) {
           throw new BadRequestException(err.message || 'Invalid MAC address format');
         }
+        if (canonicalMac && canonicalMac !== existing.macAddress) {
+          const macOwner = await prisma.customer.findFirst({
+            where: {
+              organizationId,
+              macAddress: canonicalMac,
+              id: { not: id },
+            },
+          });
+          if (macOwner) {
+            throw new ConflictException(
+              `MAC address '${canonicalMac}' is already bound to customer '${macOwner.name}' (${macOwner.customerCode})`,
+            );
+          }
+        }
       }
       updateData.macAddress = canonicalMac;
+      updateData.macResetPending = false;
     } else {
       canonicalMac = existing.macAddress || null;
     }
@@ -464,49 +671,139 @@ export class CustomersService {
       const updated = await tx.customer.update({
         where: { id },
         data: updateData,
+        include: {
+          zone: { select: { id: true, name: true } },
+          node: { select: { id: true, name: true } },
+        },
       });
 
-      // Synchronize FreeRADIUS if username, password, or macAddress modified
       const currentUsername = updated.username;
       const prevUsername = existing.username;
-      const isRenamed = prevUsername !== currentUsername;
-
-      const hasPasswordChange =
-        data.pppoePassword !== undefined &&
-        data.pppoePassword !== null &&
-        typeof data.pppoePassword === 'string' &&
-        data.pppoePassword.trim() !== '';
-
-      if (isRenamed) {
-        const prevCandidates = getRadiusUsernameCandidates(prevUsername);
-        await tx.radCheck.deleteMany({ where: { username: { in: prevCandidates } } });
-        await tx.radReply.deleteMany({ where: { username: { in: prevCandidates } } });
-      }
-
+      const prevCandidates = getRadiusUsernameCandidates(prevUsername);
       const targetUsernames = getRadiusUsernameCandidates(currentUsername);
 
-      // 1. Password synchronization
-      if (isRenamed || hasPasswordChange) {
-        await tx.radCheck.deleteMany({ where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' } });
+      // Step A: FreeRADIUS Username Migration & radreply preservation
+      if (isRenamed) {
+        // 1. Fetch existing radreply rows for previous candidates to preserve rate limit, pool, service-type, etc.
+        const existingReplies = await tx.radReply.findMany({
+          where: { username: { in: prevCandidates } },
+        });
+
+        // Delete old candidates from radcheck and radreply so old identity immediately rejects
+        await tx.radCheck.deleteMany({ where: { username: { in: prevCandidates } } });
+        await tx.radReply.deleteMany({ where: { username: { in: prevCandidates } } });
+
+        // Re-create all reply attributes on target usernames
+        if (existingReplies.length > 0) {
+          const distinctAttrs = new Map<string, { attribute: string; op: string; value: string }>();
+          for (const rep of existingReplies) {
+            if (!distinctAttrs.has(rep.attribute)) {
+              distinctAttrs.set(rep.attribute, { attribute: rep.attribute, op: rep.op, value: rep.value });
+            }
+          }
+
+          for (const u of targetUsernames) {
+            for (const [, item] of distinctAttrs.entries()) {
+              let valueToSet = item.value;
+              let attrToSet = item.attribute;
+
+              if (attrToSet === 'Framed-IP-Address' && updated.staticIp) {
+                valueToSet = updated.staticIp;
+              } else if (attrToSet === 'Framed-Pool' && updated.staticIp) {
+                attrToSet = 'Framed-IP-Address';
+                valueToSet = updated.staticIp;
+              } else if (attrToSet === 'Framed-IP-Address' && !updated.staticIp) {
+                attrToSet = 'Framed-Pool';
+                valueToSet = 'pppoe';
+              }
+
+              await tx.radReply.create({
+                data: {
+                  username: u,
+                  attribute: attrToSet,
+                  op: item.op,
+                  value: valueToSet,
+                },
+              });
+            }
+          }
+        } else {
+          // Fallback if no prior reply records existed
+          for (const u of targetUsernames) {
+            await tx.radReply.create({
+              data: {
+                username: u,
+                attribute: 'Mikrotik-Rate-Limit',
+                op: '=',
+                value: '50M/50M',
+              },
+            });
+            await tx.radReply.create({
+              data: {
+                username: u,
+                attribute: 'Service-Type',
+                op: '=',
+                value: 'Framed-User',
+              },
+            });
+            await tx.radReply.create({
+              data: {
+                username: u,
+                attribute: updated.staticIp ? 'Framed-IP-Address' : 'Framed-Pool',
+                op: '=',
+                value: updated.staticIp || 'pppoe',
+              },
+            });
+          }
+        }
+      } else if (hasStaticIpChange) {
+        // If username didn't change but static IP did, update Framed-IP-Address / Framed-Pool
+        await tx.radReply.deleteMany({
+          where: {
+            username: { in: targetUsernames },
+            attribute: { in: ['Framed-IP-Address', 'Framed-Pool'] },
+          },
+        });
+        for (const u of targetUsernames) {
+          await tx.radReply.create({
+            data: {
+              username: u,
+              attribute: updated.staticIp ? 'Framed-IP-Address' : 'Framed-Pool',
+              op: '=',
+              value: updated.staticIp || 'pppoe',
+            },
+          });
+        }
+      }
+
+      // Step B: Synchronize radcheck Cleartext-Password
+      if (isRenamed || hasPasswordChange || hasStatusChange) {
+        await tx.radCheck.deleteMany({
+          where: { username: { in: targetUsernames }, attribute: 'Cleartext-Password' },
+        });
+
+        const effectivePassword =
+          updated.status === CustomerStatus.ACTIVE ? updated.pppoePassword : `SUSPENDED_${Date.now()}`;
+
         for (const u of targetUsernames) {
           await tx.radCheck.create({
             data: {
               username: u,
               attribute: 'Cleartext-Password',
               op: ':=',
-              value: updated.status === CustomerStatus.ACTIVE ? updated.pppoePassword : `SUSPENDED_${Date.now()}`,
+              value: effectivePassword,
             },
           });
         }
       }
 
-      // 2. MAC address synchronization if macAddress was modified or if username renamed
-      if (hasMacChange || isRenamed) {
+      // Step C: Synchronize radcheck Calling-Station-Id (MAC address restriction)
+      if (isRenamed || hasMacChange || hasStatusChange) {
         await tx.radCheck.deleteMany({
           where: { username: { in: targetUsernames }, attribute: 'Calling-Station-Id' },
         });
 
-        if (canonicalMac) {
+        if (canonicalMac && updated.status === CustomerStatus.ACTIVE) {
           for (const u of targetUsernames) {
             await tx.radCheck.create({
               data: {
@@ -520,7 +817,46 @@ export class CustomersService {
         }
       }
 
-      // Record Audit Log for UPDATE
+      // Step D: FreeRADIUS Reply adjustments on status change (throttle to 64k/64k on suspend, restore on active)
+      if (hasStatusChange && !isRenamed) {
+        if (updated.status === CustomerStatus.SUSPENDED) {
+          await tx.radReply.deleteMany({
+            where: { username: { in: targetUsernames }, attribute: 'Mikrotik-Rate-Limit' },
+          });
+          for (const u of targetUsernames) {
+            await tx.radReply.create({
+              data: {
+                username: u,
+                attribute: 'Mikrotik-Rate-Limit',
+                op: '=',
+                value: '64k/64k',
+              },
+            });
+          }
+        } else if (updated.status === CustomerStatus.ACTIVE) {
+          const activeSub = await tx.subscription.findFirst({
+            where: { customerId: id, organizationId, status: SubscriptionStatus.ACTIVE },
+            include: { plan: true },
+          });
+          const restoredRate = activeSub?.plan ? generateMikrotikRateLimit(activeSub.plan) : '50M/50M';
+
+          await tx.radReply.deleteMany({
+            where: { username: { in: targetUsernames }, attribute: 'Mikrotik-Rate-Limit' },
+          });
+          for (const u of targetUsernames) {
+            await tx.radReply.create({
+              data: {
+                username: u,
+                attribute: 'Mikrotik-Rate-Limit',
+                op: '=',
+                value: restoredRate,
+              },
+            });
+          }
+        }
+      }
+
+      // Step E: Record Audit Log for UPDATE
       await tx.auditLog.create({
         data: {
           organizationId,
@@ -532,24 +868,110 @@ export class CustomersService {
             before: {
               name: existing.name,
               customerCode: existing.customerCode,
+              username: existing.username,
               mobile: existing.mobile,
+              phone: existing.phone,
+              email: existing.email,
               address: existing.address,
+              installationAddress: existing.installationAddress,
               status: existing.status,
               macAddress: existing.macAddress,
+              staticIp: existing.staticIp,
+              aadhaarNumber: existing.aadhaarNumber,
+              gstin: existing.gstin,
+              zoneId: existing.zoneId,
+              nodeId: existing.nodeId,
             },
             after: {
               name: updated.name,
               customerCode: updated.customerCode,
+              username: updated.username,
               mobile: updated.mobile,
+              phone: updated.phone,
+              email: updated.email,
               address: updated.address,
+              installationAddress: updated.installationAddress,
               status: updated.status,
               macAddress: updated.macAddress,
+              staticIp: updated.staticIp,
+              aadhaarNumber: updated.aadhaarNumber,
+              gstin: updated.gstin,
+              zoneId: updated.zoneId,
+              nodeId: updated.nodeId,
+            },
+            flags: {
+              usernameChanged: isRenamed,
+              passwordChanged: hasPasswordChange,
+              macChanged: hasMacChange,
+              statusChanged: hasStatusChange,
+              staticIpChanged: hasStaticIpChange,
             },
           },
         },
       });
 
       return this.formatCustomer(updated);
+    });
+  }
+
+  /**
+   * Reset authorized MAC address and transition subscriber into auto-learning pending state.
+   * Removes old Calling-Station-Id restriction in FreeRADIUS radcheck and sets macResetPending = true.
+   * Next successful PPPoE login will automatically capture and bind the device's Calling-Station-Id.
+   */
+  async resetMac(organizationId: string, adminUserId: string | undefined, id: string) {
+    const existing = await prisma.customer.findFirst({
+      where: { id, organizationId },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Customer with ID '${id}' not found in your organization`);
+    }
+
+    const targetUsernames = getRadiusUsernameCandidates(existing.username);
+
+    return prisma.$transaction(async (tx) => {
+      // 1. Clear customer MAC and enter pending reset state
+      const updated = await tx.customer.update({
+        where: { id },
+        data: {
+          macAddress: null,
+          macResetPending: true,
+        },
+      });
+
+      // 2. Remove old Calling-Station-Id check from radcheck
+      await tx.radCheck.deleteMany({
+        where: {
+          username: { in: targetUsernames },
+          attribute: 'Calling-Station-Id',
+        },
+      });
+
+      // 3. Record Audit Log: MAC_RESET_REQUESTED
+      await tx.auditLog.create({
+        data: {
+          organizationId,
+          adminUserId,
+          action: AuditAction.MAC_RESET_REQUESTED,
+          entityType: 'Customer',
+          entityId: id,
+          details: {
+            customerId: id,
+            username: existing.username,
+            previousMac: existing.macAddress || null,
+            status: 'WAITING_FOR_NEW_DEVICE',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        username: updated.username,
+        macAddress: null,
+        macResetPending: true,
+        message: 'MAC reset initiated. The next successful PPPoE login will automatically register its device MAC.',
+      };
     });
   }
 
@@ -931,8 +1353,23 @@ export class CustomersService {
     if (!nasIp) {
       const router = await prisma.router.findFirst({
         where: { organizationId },
+        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
       });
-      nasIp = router?.host || undefined;
+      if (router) {
+        if (
+          router.connectionMethod === RouterConnectionMethod.SSTP_TUNNEL ||
+          router.connectionMethod === 'SSTP_TUNNEL'
+        ) {
+          if (!router.vpnIp) {
+            throw new BadRequestException(
+              'SSTP router has no vpnIp assigned; cannot reach via public host',
+            );
+          }
+          nasIp = router.vpnIp;
+        } else {
+          nasIp = router.host;
+        }
+      }
     }
 
     let jobId: string | undefined;
@@ -963,6 +1400,357 @@ export class CustomersService {
   }
 
   /**
+   * Real-time connection & session telemetry from radacct (Tenant Enforced)
+   */
+  async getConnection(organizationId: string, id: string) {
+    const customer = await prisma.customer.findFirst({
+      where: { id, organizationId },
+      include: {
+        subscriptions: {
+          where: { status: SubscriptionStatus.ACTIVE },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { plan: true },
+        },
+      },
+    });
+    if (!customer) {
+      throw new NotFoundException(`Customer '${id}' not found in your organization`);
+    }
+
+    const candidates = getRadiusUsernameCandidates(customer.username);
+    const activeSub = customer.subscriptions[0];
+    const rateLimit = activeSub?.plan
+      ? generateMikrotikRateLimit(activeSub.plan)
+      : '50M/50M';
+
+    // 1. Try finding an active session (acctstoptime IS NULL)
+    const activeSession = await prisma.radAcct.findFirst({
+      where: {
+        username: { in: candidates },
+        acctstoptime: null,
+      },
+      orderBy: { acctstarttime: 'desc' },
+    });
+
+    let isOnline = false;
+    let session = activeSession;
+
+    if (activeSession) {
+      isOnline = true;
+    } else {
+      // 2. Fall back to latest terminated session
+      session = await prisma.radAcct.findFirst({
+        where: {
+          username: { in: candidates },
+        },
+        orderBy: { acctstarttime: 'desc' },
+      });
+    }
+
+    if (!session) {
+      return {
+        isOnline: false,
+        acctSessionId: null,
+        loginTime: null,
+        logoutTime: null,
+        sessionDuration: 0,
+        framedIp: customer.staticIp || null,
+        callingStationId: null,
+        authorizedMac: customer.macAddress || null,
+        macResetPending: Boolean(customer.macResetPending),
+        isMacMatch: false,
+        nasIp: null,
+        routerName: null,
+        nasPort: null,
+        serviceType: 'Framed-User',
+        currentTransfer: { downloadBytes: 0, uploadBytes: 0, totalBytes: 0 },
+        rateLimit,
+        lastUpdate: null,
+        terminateCause: null,
+      };
+    }
+
+    // Resolve Router Name from nasipaddress
+    let routerName: string | null = null;
+    if (session.nasipaddress) {
+      const router = await prisma.router.findFirst({
+        where: {
+          organizationId,
+          OR: [
+            { vpnIp: session.nasipaddress },
+            { host: session.nasipaddress, connectionMethod: 'DIRECT_API' },
+          ],
+        },
+        orderBy: [
+          { status: 'asc' },
+          { updatedAt: 'desc' },
+        ],
+        select: { name: true },
+      });
+      routerName = router?.name || null;
+    }
+
+    let isMacMatch = false;
+    if (customer.macAddress && session.callingstationid) {
+      try {
+        isMacMatch = normalizeMacAddress(customer.macAddress) === normalizeMacAddress(session.callingstationid);
+      } catch {
+        isMacMatch = customer.macAddress.toUpperCase() === session.callingstationid.toUpperCase();
+      }
+    }
+
+    const now = Date.now();
+    let sessionDuration = Number(session.acctsessiontime || 0);
+    if (isOnline && session.acctstarttime) {
+      sessionDuration = Math.max(0, Math.floor((now - new Date(session.acctstarttime).getTime()) / 1000));
+    }
+
+    const downloadBytes = Number(session.acctoutputoctets || 0);
+    const uploadBytes = Number(session.acctinputoctets || 0);
+
+    return {
+      isOnline,
+      acctSessionId: session.acctsessionid || null,
+      loginTime: session.acctstarttime ? session.acctstarttime.toISOString() : null,
+      logoutTime: session.acctstoptime ? session.acctstoptime.toISOString() : null,
+      sessionDuration,
+      framedIp: session.framedipaddress || customer.staticIp || null,
+      callingStationId: session.callingstationid || null,
+      authorizedMac: customer.macAddress || null,
+      macResetPending: Boolean(customer.macResetPending),
+      isMacMatch,
+      nasIp: session.nasipaddress || null,
+      routerName,
+      nasPort: session.nasportid || null,
+      serviceType: session.servicetype || 'Framed-User',
+      currentTransfer: {
+        downloadBytes,
+        uploadBytes,
+        totalBytes: downloadBytes + uploadBytes,
+      },
+      rateLimit,
+      lastUpdate: (session.acctupdatetime || session.acctstarttime || new Date()).toISOString(),
+      terminateCause: session.acctterminatecause || null,
+    };
+  }
+
+  /**
+   * Aggregate real RADIUS accounting data usage: Today, This Month, and Lifetime (Tenant Enforced)
+   */
+  async getUsage(organizationId: string, id: string) {
+    const customer = await prisma.customer.findFirst({
+      where: { id, organizationId },
+    });
+    if (!customer) {
+      throw new NotFoundException(`Customer '${id}' not found in your organization`);
+    }
+
+    const candidates = getRadiusUsernameCandidates(customer.username);
+
+    // Compute boundaries based on current server date
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+    const sessions = await prisma.radAcct.findMany({
+      where: { username: { in: candidates } },
+      select: {
+        acctstarttime: true,
+        acctstoptime: true,
+        acctsessiontime: true,
+        acctinputoctets: true,
+        acctoutputoctets: true,
+      },
+      orderBy: { acctstarttime: 'desc' },
+    });
+
+    let todayUpload = 0;
+    let todayDownload = 0;
+    let todayDuration = 0;
+
+    let monthUpload = 0;
+    let monthDownload = 0;
+    let monthDuration = 0;
+
+    let lifeUpload = 0;
+    let lifeDownload = 0;
+    let lifeDuration = 0;
+
+    for (const s of sessions) {
+      const up = Number(s.acctinputoctets || 0);
+      const down = Number(s.acctoutputoctets || 0);
+      let dur = Number(s.acctsessiontime || 0);
+
+      // If active session, calculate elapsed time
+      if (!s.acctstoptime && s.acctstarttime) {
+        dur = Math.max(dur, Math.floor((now.getTime() - new Date(s.acctstarttime).getTime()) / 1000));
+      }
+
+      lifeUpload += up;
+      lifeDownload += down;
+      lifeDuration += dur;
+
+      if (s.acctstarttime && s.acctstarttime >= startOfMonth) {
+        monthUpload += up;
+        monthDownload += down;
+        monthDuration += dur;
+      }
+
+      if (s.acctstarttime && s.acctstarttime >= startOfToday) {
+        todayUpload += up;
+        todayDownload += down;
+        todayDuration += dur;
+      }
+    }
+
+    return {
+      today: {
+        uploadBytes: todayUpload,
+        downloadBytes: todayDownload,
+        totalBytes: todayUpload + todayDownload,
+        durationSecs: todayDuration,
+      },
+      month: {
+        uploadBytes: monthUpload,
+        downloadBytes: monthDownload,
+        totalBytes: monthUpload + monthDownload,
+        durationSecs: monthDuration,
+      },
+      lifetime: {
+        uploadBytes: lifeUpload,
+        downloadBytes: lifeDownload,
+        totalBytes: lifeUpload + lifeDownload,
+        durationSecs: lifeDuration,
+      },
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Latest 10 RADIUS authentication attempts from radpostauth (Tenant Enforced)
+   */
+  async getAccessRequests(organizationId: string, id: string) {
+    const customer = await prisma.customer.findFirst({
+      where: { id, organizationId },
+    });
+    if (!customer) {
+      throw new NotFoundException(`Customer '${id}' not found in your organization`);
+    }
+
+    const candidates = getRadiusUsernameCandidates(customer.username);
+
+    const attempts = await prisma.radPostAuth.findMany({
+      where: { username: { in: candidates } },
+      take: 10,
+      orderBy: { id: 'desc' },
+      select: {
+        id: true,
+        username: true,
+        reply: true,
+        authdate: true,
+      },
+    });
+
+    return attempts.map((a) => ({
+      id: a.id.toString(),
+      username: a.username,
+      reply: a.reply,
+      authdate: a.authdate ? a.authdate.toISOString() : null,
+    }));
+  }
+
+  /**
+   * Temporarily override subscriber bandwidth / rate-limit (Tenant Enforced, Audit Logged)
+   */
+  async overrideSpeed(
+    organizationId: string,
+    adminUserId: string | undefined,
+    id: string,
+    downloadMbps: number,
+    uploadMbps: number,
+  ) {
+    if (!downloadMbps || !uploadMbps || downloadMbps <= 0 || uploadMbps <= 0) {
+      throw new BadRequestException('Download and upload speeds must be positive numbers');
+    }
+
+    const customer = await prisma.customer.findFirst({
+      where: { id, organizationId },
+    });
+    if (!customer) {
+      throw new NotFoundException(`Customer '${id}' not found in your organization`);
+    }
+
+    const targetUsernames = getRadiusUsernameCandidates(customer.username);
+    const rateLimitString = `${uploadMbps}M/${downloadMbps}M`;
+
+    // Update radreply with new Mikrotik-Rate-Limit
+    await prisma.$transaction(async (tx) => {
+      await tx.radReply.deleteMany({
+        where: { username: { in: targetUsernames }, attribute: 'Mikrotik-Rate-Limit' },
+      });
+      for (const u of targetUsernames) {
+        await tx.radReply.create({
+          data: {
+            username: u,
+            attribute: 'Mikrotik-Rate-Limit',
+            op: '=',
+            value: rateLimitString,
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId,
+          adminUserId: adminUserId || null,
+          action: AuditAction.UPDATE,
+          entityType: 'CUSTOMER',
+          entityId: customer.id,
+          details: {
+            action: 'SPEED_OVERRIDE',
+            downloadSpeedMbps: downloadMbps,
+            uploadSpeedMbps: uploadMbps,
+            rateLimitString,
+          },
+        },
+      });
+    });
+
+    // If active session, dispatch CoA to update speed live
+    if (this.coaQueueService && customer.username) {
+      const activeSession = await prisma.radAcct.findFirst({
+        where: { username: { in: targetUsernames }, acctstoptime: null },
+        orderBy: { acctstarttime: 'desc' },
+      });
+      if (activeSession) {
+        this.coaQueueService
+          .queueCoaJob({
+            organizationId,
+            customerId: customer.id,
+            username: activeSession.username,
+            action: 'SPEED_OVERRIDE',
+            requestType: CoaRequestType.COA,
+            rateLimit: rateLimitString,
+            sessionId: activeSession.acctsessionid,
+            framedIp: activeSession.framedipaddress || undefined,
+            nasIp: activeSession.nasipaddress || undefined,
+            reason: `Speed override to ${rateLimitString}`,
+            adminUserId,
+          })
+          .catch((err) => console.warn(`[CustomersService] Failed to enqueue CoA for speed override: ${err.message}`));
+      }
+    }
+
+    return {
+      message: `Bandwidth rate limit updated to ${rateLimitString}`,
+      rateLimitString,
+      downloadMbps,
+      uploadMbps,
+    };
+  }
+
+  /**
    * Helper to normalize customer fields
    */
   private formatCustomer(c: any) {
@@ -972,18 +1760,26 @@ export class CustomersService {
       customerCode: c.customerCode,
       name: c.name,
       mobile: c.mobile || c.phone || '',
-      phone: c.mobile || c.phone || '',
+      phone: c.phone || c.mobile || '',
+      alternatePhone: c.alternatePhone || null,
       email: c.email || '',
       address: c.address || c.installationAddress || '',
-      installationAddress: c.address || c.installationAddress || '',
+      installationAddress: c.installationAddress || c.address || '',
       area: c.area || '',
       city: c.city || '',
       state: c.state || '',
       pincode: c.pincode || '',
+      zoneId: c.zoneId || null,
+      nodeId: c.nodeId || null,
+      zone: c.zone ? { id: c.zone.id, name: c.zone.name } : null,
+      node: c.node ? { id: c.node.id, name: c.node.name } : null,
+      aadhaarNumber: c.aadhaarNumber || null,
+      gstin: c.gstin || null,
       username: c.username || c.pppoeUsername || '',
       pppoeUsername: c.username || c.pppoeUsername || '',
       staticIp: c.staticIp || null,
       macAddress: c.macAddress || null,
+      macResetPending: Boolean(c.macResetPending),
       status: c.status,
       installationDate: c.installationDate ? c.installationDate.toISOString() : null,
       notes: c.notes || '',

@@ -35,6 +35,8 @@ export class CustomersController {
   @ApiQuery({ name: 'status', required: false, enum: CustomerStatus })
   @ApiQuery({ name: 'area', required: false, type: String })
   @ApiQuery({ name: 'city', required: false, type: String })
+  @ApiQuery({ name: 'zoneId', required: false, type: String })
+  @ApiQuery({ name: 'nodeId', required: false, type: String })
   async list(
     @CurrentOrgId() organizationId: string,
     @Query('page') page?: number,
@@ -43,6 +45,8 @@ export class CustomersController {
     @Query('status') status?: string,
     @Query('area') area?: string,
     @Query('city') city?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('nodeId') nodeId?: string,
   ) {
     return this.customersService.list(organizationId, {
       page,
@@ -51,6 +55,8 @@ export class CustomersController {
       status,
       area,
       city,
+      zoneId,
+      nodeId,
     });
   }
 

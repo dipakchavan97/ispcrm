@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
@@ -77,11 +78,13 @@ function formatTimestamp(isoString: string | null) {
   return { formatted, relative };
 }
 
-export default function AccessRequestsPage() {
+function AccessRequestsContent() {
   const { showToast } = useToast();
+  const searchParams = useSearchParams();
+  const initialUsername = searchParams?.get('username') || '';
 
   // Search & Filter State
-  const [usernameSearch, setUsernameSearch] = useState('');
+  const [usernameSearch, setUsernameSearch] = useState(initialUsername);
   const [macSearch, setMacSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACCEPT' | 'REJECT'>('ALL');
   const [fromDate, setFromDate] = useState('');
@@ -89,6 +92,12 @@ export default function AccessRequestsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  useEffect(() => {
+    if (initialUsername) {
+      setUsernameSearch(initialUsername);
+    }
+  }, [initialUsername]);
 
   // Build query string
   const queryParams = useMemo(() => {
@@ -639,5 +648,20 @@ export default function AccessRequestsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AccessRequestsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 space-y-6 max-w-[1440px] mx-auto animate-pulse">
+          <div className="h-8 w-64 bg-slate-800 rounded-xl" />
+          <div className="h-48 bg-slate-900 border border-slate-800 rounded-2xl" />
+        </div>
+      }
+    >
+      <AccessRequestsContent />
+    </Suspense>
   );
 }

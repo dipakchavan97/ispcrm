@@ -10,6 +10,8 @@ import {
   CustomerStatus,
   BillingCycle,
   AuditAction,
+  InvoiceSource,
+  InvoiceStatus,
   buildNetworkPolicyFromPlan,
   translateNetworkPolicyToRadius,
   calculateSubscriptionEndDate,
@@ -23,6 +25,7 @@ import {
   normalizeMacAddress,
 } from '@isp-crm/shared';
 import { RadiusCoaQueueService } from '../radius/radius-coa-queue.service';
+import { InvoicesService } from '../invoices/invoices.service';
 
 export interface SubscriptionListFilter {
   status?: string;
@@ -32,9 +35,14 @@ export interface SubscriptionListFilter {
 
 @Injectable()
 export class SubscriptionsService {
+  private invoicesService: InvoicesService;
+
   constructor(
     @Optional() private readonly coaQueueService?: RadiusCoaQueueService,
-  ) {}
+    @Optional() private readonly injectedInvoicesService?: InvoicesService,
+  ) {
+    this.invoicesService = this.injectedInvoicesService || new InvoicesService();
+  }
   /**
    * Helper to verify and sanitize adminUserId against foreign key constraint
    */
@@ -176,6 +184,9 @@ export class SubscriptionsService {
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
     return prisma.$transaction(async (tx) => {
+      // Row lock on customer to serialize concurrent subscription creations
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`;
+
       if (targetStatus === SubscriptionStatus.ACTIVE) {
         await tx.subscription.updateMany({
           where: {
@@ -248,7 +259,26 @@ export class SubscriptionsService {
         await this.syncRadiusOnActivation(tx, customer, rateLimit);
       }
 
-      return subscription;
+      // Automatically generate invoice for paid package assignment
+      let invoice: any = null;
+      if (Number(price) > 0) {
+        invoice = await this.invoicesService.createSubscriptionInvoice(tx, {
+          organizationId,
+          customerId,
+          subscriptionId: subscription.id,
+          planId,
+          servicePeriodStart: startDate,
+          servicePeriodEnd: endDate,
+          source: InvoiceSource.SUBSCRIPTION_ASSIGNMENT,
+          adminUserId: finalAdminUserId,
+          unitPrice: price,
+        });
+      }
+
+      return {
+        ...subscription,
+        invoice,
+      };
     });
   }
 
@@ -388,11 +418,74 @@ export class SubscriptionsService {
     const anchorDate = new Date(sub.endDate) > now ? new Date(sub.endDate) : now;
     const newEndDate = calculateSubscriptionEndDate(anchorDate, billingCycle, validityDays, tz);
 
+    // Idempotency & Retry Check:
+    // If this subscription has already been extended within the last 60s and an active invoice exists
+    // for that exact renewal service period, safely return the existing subscription and invoice.
+    const recentRenewalHistory = await prisma.subscriptionHistory.findFirst({
+      where: {
+        organizationId,
+        subscriptionId: sub.id,
+        action: 'RENEW',
+        createdAt: { gte: new Date(Date.now() - 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (
+      recentRenewalHistory &&
+      recentRenewalHistory.newEndDate &&
+      new Date(sub.endDate).getTime() === new Date(recentRenewalHistory.newEndDate).getTime()
+    ) {
+      const existingInvoice = await prisma.invoice.findFirst({
+        where: {
+          organizationId,
+          subscriptionId: sub.id,
+          servicePeriodEnd: sub.endDate,
+          status: { not: InvoiceStatus.CANCELLED },
+        },
+        include: { items: true, customer: true },
+      });
+      if (existingInvoice) {
+        return {
+          ...sub,
+          invoice: existingInvoice,
+        };
+      }
+    }
+
     const radiusPolicy = translateNetworkPolicyToRadius(buildNetworkPolicyFromPlan(sub.plan));
     const rateLimit = radiusPolicy['Mikrotik-Rate-Limit'];
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
     return prisma.$transaction(async (tx) => {
+      // Row-level lock on subscription to serialize concurrent renewal attempts
+      const lockedSubs: any[] = await tx.$queryRaw`SELECT id, "endDate", "startDate", "status", "planId", "price" FROM subscriptions WHERE id = ${id} FOR UPDATE`;
+      if (!lockedSubs || lockedSubs.length === 0) {
+        throw new NotFoundException('Subscription not found');
+      }
+      const lockedSub = lockedSubs[0];
+
+      // If a concurrent transaction already renewed this subscription, return existing invoice idempotently
+      if (new Date(lockedSub.endDate).getTime() > new Date(sub.endDate).getTime()) {
+        const existingInvoice = await tx.invoice.findFirst({
+          where: {
+            organizationId,
+            subscriptionId: id,
+            servicePeriodEnd: lockedSub.endDate,
+            status: { not: InvoiceStatus.CANCELLED },
+          },
+          include: { customer: true, items: true },
+        });
+        const currentSub = await tx.subscription.findUnique({
+          where: { id },
+          include: { customer: true, plan: true },
+        });
+        return {
+          ...currentSub,
+          invoice: existingInvoice,
+        };
+      }
+
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -441,7 +534,27 @@ export class SubscriptionsService {
 
       await this.syncRadiusOnActivation(tx, sub.customer, rateLimit);
 
-      return updated;
+      // Automatically generate invoice for the newly renewed service period
+      let invoice: any = null;
+      const renewalPrice = options?.price !== undefined ? options.price : (sub.price || sub.plan.price);
+      if (Number(renewalPrice) > 0) {
+        invoice = await this.invoicesService.createSubscriptionInvoice(tx, {
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: updated.id,
+          planId: sub.planId,
+          servicePeriodStart: anchorDate,
+          servicePeriodEnd: newEndDate,
+          source: InvoiceSource.SUBSCRIPTION_RENEWAL,
+          adminUserId: finalAdminUserId,
+          unitPrice: renewalPrice,
+        });
+      }
+
+      return {
+        ...updated,
+        invoice,
+      };
     });
   }
 
@@ -503,6 +616,7 @@ export class SubscriptionsService {
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM subscriptions WHERE id = ${sub.id} FOR UPDATE`;
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -544,7 +658,26 @@ export class SubscriptionsService {
         });
       }
 
-      return updated;
+      // Automatically generate invoice for the plan upgrade
+      let invoice: any = null;
+      if (Number(newPlan.price) > 0) {
+        invoice = await this.invoicesService.createSubscriptionInvoice(tx, {
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: updated.id,
+          planId: newPlan.id,
+          servicePeriodStart: updated.startDate,
+          servicePeriodEnd: updated.endDate,
+          source: InvoiceSource.PLAN_CHANGE,
+          adminUserId: finalAdminUserId,
+          unitPrice: newPlan.price,
+        });
+      }
+
+      return {
+        ...updated,
+        invoice,
+      };
     });
 
     // Asynchronously queue RADIUS CoA to apply upgraded bandwidth dynamically to live router session
@@ -626,6 +759,7 @@ export class SubscriptionsService {
     const finalAdminUserId = await this.sanitizeAdminUserId(adminUserId);
 
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM subscriptions WHERE id = ${sub.id} FOR UPDATE`;
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         data: {
@@ -667,7 +801,26 @@ export class SubscriptionsService {
         });
       }
 
-      return updated;
+      // Automatically generate invoice for the plan downgrade if billable
+      let invoice: any = null;
+      if (Number(newPlan.price) > 0) {
+        invoice = await this.invoicesService.createSubscriptionInvoice(tx, {
+          organizationId,
+          customerId: sub.customerId,
+          subscriptionId: updated.id,
+          planId: newPlan.id,
+          servicePeriodStart: updated.startDate,
+          servicePeriodEnd: updated.endDate,
+          source: InvoiceSource.PLAN_CHANGE,
+          adminUserId: finalAdminUserId,
+          unitPrice: newPlan.price,
+        });
+      }
+
+      return {
+        ...updated,
+        invoice,
+      };
     });
 
     // Asynchronously queue RADIUS CoA to apply downgraded bandwidth dynamically to live router session

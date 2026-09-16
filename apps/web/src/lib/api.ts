@@ -432,3 +432,195 @@ export async function previewCafPdf(customerId: string): Promise<void> {
     } catch {}
   }, 180000);
 }
+
+// =========================================================================
+// Zones & Nodes Hierarchy API Methods
+// =========================================================================
+
+export interface StaffUserOption {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  role: string;
+}
+
+export interface RouterOption {
+  id: string;
+  name: string;
+  host: string;
+  status?: string;
+}
+
+export interface ZoneItem {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  servicePersonId: string | null;
+  collectorId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  servicePerson?: StaffUserOption | null;
+  collector?: StaffUserOption | null;
+  _count?: {
+    nodes: number;
+    customers: number;
+  };
+  nodes?: NodeItem[];
+}
+
+export interface NodeItem {
+  id: string;
+  organizationId: string;
+  zoneId: string;
+  name: string;
+  description: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  routerId: string | null;
+  status: string; // 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE'
+  createdAt: string;
+  updatedAt: string;
+  zone?: { id: string; name: string };
+  router?: RouterOption | null;
+  uplinkRouter?: RouterOption | null;
+  _count?: {
+    customers: number;
+  };
+}
+
+export interface CreateZonePayload {
+  name: string;
+  description?: string;
+  servicePersonId?: string;
+  collectorId?: string;
+}
+
+export interface UpdateZonePayload {
+  name?: string;
+  description?: string;
+  servicePersonId?: string | null;
+  collectorId?: string | null;
+}
+
+export interface CreateNodePayload {
+  name: string;
+  description?: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  routerId?: string | null;
+  status?: string;
+}
+
+export interface UpdateNodePayload {
+  name?: string;
+  description?: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  routerId?: string | null;
+  status?: string;
+}
+
+export interface ZoneListResponse {
+  items: ZoneItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface NodeListResponse {
+  items: NodeItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export async function listZones(
+  filters: { page?: number; limit?: number; search?: string } = {}
+): Promise<ZoneListResponse> {
+  const params = new URLSearchParams();
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+  if (filters.search) params.append('search', filters.search);
+  const q = params.toString();
+  return apiFetch<ZoneListResponse>(`/zones${q ? `?${q}` : ''}`);
+}
+
+export async function getZone(id: string): Promise<ZoneItem> {
+  return apiFetch<ZoneItem>(`/zones/${encodeURIComponent(id)}`);
+}
+
+export async function createZone(data: CreateZonePayload): Promise<ZoneItem> {
+  return apiFetch<ZoneItem>('/zones', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateZone(id: string, data: UpdateZonePayload): Promise<ZoneItem> {
+  return apiFetch<ZoneItem>(`/zones/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteZone(id: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>(`/zones/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listNodes(
+  zoneIdOrFilters?: string | { zoneId?: string; page?: number; limit?: number; search?: string; status?: string },
+  maybeFilters: { page?: number; limit?: number; search?: string; status?: string } = {}
+): Promise<NodeListResponse> {
+  if (typeof zoneIdOrFilters === 'string') {
+    const params = new URLSearchParams();
+    if (maybeFilters.page) params.append('page', maybeFilters.page.toString());
+    if (maybeFilters.limit) params.append('limit', maybeFilters.limit.toString());
+    if (maybeFilters.search) params.append('search', maybeFilters.search);
+    if (maybeFilters.status) params.append('status', maybeFilters.status);
+    const q = params.toString();
+    return apiFetch<NodeListResponse>(`/zones/${encodeURIComponent(zoneIdOrFilters)}/nodes${q ? `?${q}` : ''}`);
+  }
+
+  const filters = zoneIdOrFilters || {};
+  const params = new URLSearchParams();
+  if (filters.zoneId) params.append('zoneId', filters.zoneId);
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+  if (filters.search) params.append('search', filters.search);
+  if (filters.status) params.append('status', filters.status);
+  const q = params.toString();
+  return apiFetch<NodeListResponse>(`/nodes${q ? `?${q}` : ''}`);
+}
+
+export async function getNode(id: string): Promise<NodeItem> {
+  return apiFetch<NodeItem>(`/nodes/${encodeURIComponent(id)}`);
+}
+
+export async function createNode(zoneId: string, data: CreateNodePayload): Promise<NodeItem> {
+  return apiFetch<NodeItem>(`/zones/${encodeURIComponent(zoneId)}/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateNode(id: string, data: UpdateNodePayload): Promise<NodeItem> {
+  return apiFetch<NodeItem>(`/nodes/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteNode(id: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>(`/nodes/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}

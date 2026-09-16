@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import {
@@ -85,9 +86,12 @@ interface UnpaidInvoiceOption {
   dueDate: string;
 }
 
-export default function PaymentsPage() {
+function PaymentsContent() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const searchParams = useSearchParams();
+  const queryCustomerId = searchParams?.get('customerId') || '';
+  const queryInvoiceId = searchParams?.get('invoiceId') || '';
 
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
@@ -101,7 +105,7 @@ export default function PaymentsPage() {
   const [refundReason, setRefundReason] = useState('');
 
   // Selected customer for creating payment
-  const [selectedCustId, setSelectedCustId] = useState<string>('');
+  const [selectedCustId, setSelectedCustId] = useState<string>(queryCustomerId);
 
   // 1. Fetch Paginated Payments
   const {
@@ -110,7 +114,7 @@ export default function PaymentsPage() {
     isError,
     refetch,
   } = useQuery<PaymentListResponse>({
-    queryKey: ['payments', page, limit, search, statusFilter, methodFilter],
+    queryKey: ['payments', page, limit, search, statusFilter, methodFilter, queryCustomerId],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
@@ -118,6 +122,7 @@ export default function PaymentsPage() {
       if (search.trim()) params.set('search', search.trim());
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (methodFilter !== 'ALL') params.set('paymentMethod', methodFilter);
+      if (queryCustomerId) params.set('customerId', queryCustomerId);
 
       return apiFetch<PaymentListResponse>(`/payments?${params.toString()}`);
     },
@@ -146,14 +151,25 @@ export default function PaymentsPage() {
     formState: { errors: formErrors },
   } = useForm({
     defaultValues: {
-      customerId: '',
-      invoiceId: '',
+      customerId: queryCustomerId || '',
+      invoiceId: queryInvoiceId || '',
       amount: '',
       paymentMethod: 'UPI',
       transactionRef: '',
       notes: '',
     },
   });
+
+  useEffect(() => {
+    if (queryCustomerId) {
+      setSelectedCustId(queryCustomerId);
+      setValue('customerId', queryCustomerId);
+      setIsRecordModalOpen(true);
+      if (queryInvoiceId) {
+        setValue('invoiceId', queryInvoiceId);
+      }
+    }
+  }, [queryCustomerId, queryInvoiceId, setValue]);
 
   // Handle customer select change in form
   const handleCustomerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -260,14 +276,14 @@ export default function PaymentsPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Top Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-inner">
+          <div className="p-2.5 rounded-xl bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 shadow-inner shrink-0">
             <IndianRupee className="h-6 w-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-slate-100 tracking-tight">Payment Receipts & Ledger</h1>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">Payment Receipts & Ledger</h1>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
                 {paymentsData.total} Transactions
               </span>
@@ -278,10 +294,10 @@ export default function PaymentsPage() {
           </div>
         </div>
 
-        <div className="flex items-center flex-wrap gap-2.5">
+        <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors"
             title="Refresh payments list"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -293,7 +309,7 @@ export default function PaymentsPage() {
               setSelectedCustId('');
               setIsRecordModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-500/20 transition-all"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Record Payment</span>
@@ -311,7 +327,7 @@ export default function PaymentsPage() {
           </>
         ) : (
           <>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-1.5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg space-y-1.5">
               <span className="text-xs text-slate-400 font-medium">Page Collections (Settled)</span>
               <p className="text-xl font-bold text-emerald-400 font-mono">
                 ₹ {totalCollections.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -319,7 +335,7 @@ export default function PaymentsPage() {
               <p className="text-[11px] text-slate-500">Across {paymentsData.items.length} records on current view</p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-1.5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg space-y-1.5">
               <span className="text-xs text-slate-400 font-medium">Digital & UPI Collections</span>
               <p className="text-xl font-bold text-blue-400 font-mono">
                 ₹ {digitalTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -327,7 +343,7 @@ export default function PaymentsPage() {
               <p className="text-[11px] text-slate-500">UPI, Net Banking, Gateway</p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg space-y-1.5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg space-y-1.5">
               <span className="text-xs text-slate-400 font-medium">Cash Collections</span>
               <p className="text-xl font-bold text-amber-400 font-mono">
                 ₹ {cashTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -339,7 +355,7 @@ export default function PaymentsPage() {
       </div>
 
       {/* Search & Filters Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-4 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
           <input
@@ -350,13 +366,13 @@ export default function PaymentsPage() {
               setPage(1);
             }}
             placeholder="Search receipt #, subscriber, ref..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 min-h-[40px] text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
           />
         </div>
 
-        <div className="flex items-center flex-wrap gap-3 w-full md:w-auto">
+        <div className="flex items-center flex-wrap gap-2.5 sm:gap-3 w-full md:w-auto">
           {/* Method Filter */}
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs flex-1 sm:flex-initial">
             <span className="text-slate-400 shrink-0">Method:</span>
             <select
               value={methodFilter}
@@ -364,7 +380,7 @@ export default function PaymentsPage() {
                 setMethodFilter(e.target.value);
                 setPage(1);
               }}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+              className="w-full sm:w-auto bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 min-h-[40px] text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="ALL">All Methods</option>
               <option value="UPI">UPI</option>
@@ -376,7 +392,7 @@ export default function PaymentsPage() {
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-xs flex-1 sm:flex-initial">
             <span className="text-slate-400 shrink-0">Status:</span>
             <select
               value={statusFilter}
@@ -384,7 +400,7 @@ export default function PaymentsPage() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+              className="w-full sm:w-auto bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 min-h-[40px] text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
             >
               <option value="ALL">All Statuses</option>
               <option value="SUCCESS">Success</option>
@@ -397,9 +413,9 @@ export default function PaymentsPage() {
       </div>
 
       {/* Payments Ledger Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl min-w-0 w-full">
+        <div className="overflow-x-auto w-full min-w-0">
+          <table className="w-full min-w-[760px] text-left text-xs">
             <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="px-4 py-3.5">Receipt #</th>
@@ -529,7 +545,7 @@ export default function PaymentsPage() {
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => setSelectedPaymentForReceipt(p)}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all"
+                          className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all min-h-[36px] min-w-[36px] inline-flex items-center justify-center"
                           title="View & Print Money Receipt"
                         >
                           <Printer className="h-3.5 w-3.5" />
@@ -540,7 +556,7 @@ export default function PaymentsPage() {
                               setRefundTarget(p);
                               setRefundReason('');
                             }}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 transition-all"
+                            className="p-2 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 transition-all min-h-[36px] min-w-[36px] inline-flex items-center justify-center"
                             title="Process Ledger Refund"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
@@ -557,7 +573,7 @@ export default function PaymentsPage() {
 
         {/* Pagination Bar */}
         {paymentsData.totalPages > 1 && (
-          <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div className="p-3 sm:p-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
             <span>
               Showing {(page - 1) * limit + 1} to {Math.min(page * limit, paymentsData.total)} of{' '}
               {paymentsData.total} records
@@ -566,7 +582,7 @@ export default function PaymentsPage() {
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                className="flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 <span>Prev</span>
@@ -577,7 +593,7 @@ export default function PaymentsPage() {
               <button
                 onClick={() => setPage((p) => Math.min(paymentsData.totalPages, p + 1))}
                 disabled={page >= paymentsData.totalPages}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                className="flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
               >
                 <span>Next</span>
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -589,29 +605,29 @@ export default function PaymentsPage() {
 
       {/* Record Payment Modal */}
       {isRecordModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-6 shrink-0">
               <div className="flex items-center gap-2">
-                <IndianRupee className="h-5 w-5 text-emerald-400" />
+                <IndianRupee className="h-5 w-5 text-emerald-400 shrink-0" />
                 <h3 className="text-base font-semibold text-slate-100">Record Subscriber Payment</h3>
               </div>
               <button
                 onClick={() => setIsRecordModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800"
+                className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 min-h-[40px] min-w-[40px] flex items-center justify-center"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit(onRecordSubmit)} className="space-y-4 text-xs">
+            <form onSubmit={handleSubmit(onRecordSubmit)} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
               {/* Customer Selection */}
               <div>
                 <label className="text-slate-400 block mb-1">Subscriber *</label>
                 <select
                   {...register('customerId', { required: 'Please select a subscriber' })}
                   onChange={handleCustomerChange}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="">-- Choose Subscriber --</option>
                   {customersData?.items?.map((c) => (
@@ -632,7 +648,7 @@ export default function PaymentsPage() {
                   <select
                     {...register('invoiceId')}
                     onChange={handleInvoiceChange}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-slate-100 focus:outline-none focus:border-emerald-500"
                   >
                     <option value="">-- Direct Advance / General Collection --</option>
                     {customerInvoicesData?.items?.map((inv) => (
@@ -655,7 +671,7 @@ export default function PaymentsPage() {
                     min: { value: 1, message: 'Minimum collection amount is ₹1.00' },
                   })}
                   placeholder="0.00"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 font-mono text-slate-100 text-sm font-semibold focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] font-mono text-slate-100 text-sm font-semibold focus:outline-none focus:border-emerald-500"
                 />
                 {formErrors.amount && (
                   <span className="text-rose-400 text-[10px]">{formErrors.amount.message as string}</span>
@@ -667,7 +683,7 @@ export default function PaymentsPage() {
                 <label className="text-slate-400 block mb-1">Payment Method *</label>
                 <select
                   {...register('paymentMethod')}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-slate-100 focus:outline-none focus:border-emerald-500"
                 >
                   <option value="UPI">UPI (Google Pay / PhonePe / Paytm / BHIM)</option>
                   <option value="CASH">Cash Collection</option>
@@ -683,7 +699,7 @@ export default function PaymentsPage() {
                 <input
                   {...register('transactionRef')}
                   placeholder="e.g. UPI Ref / UTR / Cheque Number"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
@@ -693,7 +709,7 @@ export default function PaymentsPage() {
                 <input
                   {...register('notes')}
                   placeholder="Optional internal remarks"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-slate-100 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
@@ -701,14 +717,14 @@ export default function PaymentsPage() {
                 <button
                   type="button"
                   onClick={() => setIsRecordModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                  className="px-4 py-2.5 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={recordMutation.isPending}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[40px] rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-500/20 disabled:opacity-50"
                 >
                   {recordMutation.isPending && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                   <span>Record & Generate Receipt</span>
@@ -721,21 +737,21 @@ export default function PaymentsPage() {
 
       {/* Printable Money Receipt Modal */}
       {selectedPaymentForReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 print:hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-6 shrink-0 print:hidden">
               <h3 className="text-sm font-semibold text-slate-100">Payment Receipt Slip</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handlePrintReceipt}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold"
+                  className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   <span>Print</span>
                 </button>
                 <button
                   onClick={() => setSelectedPaymentForReceipt(null)}
-                  className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800"
+                  className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 min-h-[40px] min-w-[40px] flex items-center justify-center"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -745,7 +761,7 @@ export default function PaymentsPage() {
             {/* Receipt Content */}
             <div
               id="printable-receipt"
-              className="bg-slate-950 border border-slate-800 print:border-none print:bg-white print:text-black rounded-xl p-6 space-y-4 text-xs"
+              className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs bg-slate-950 border border-slate-800 print:border-none print:bg-white print:text-black rounded-xl m-4"
             >
               <div className="text-center border-b border-slate-800 print:border-slate-300 pb-3">
                 <h2 className="text-base font-bold text-slate-100 print:text-black">MONEY RECEIPT</h2>
@@ -824,5 +840,25 @@ export default function PaymentsPage() {
         isLoading={refundMutation.isPending}
       />
     </div>
+  );
+}
+
+export default function PaymentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 max-w-[1440px] mx-auto pb-12 p-4 sm:p-6">
+          <div className="h-8 w-48 bg-slate-800 rounded-xl animate-pulse" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
+            ))}
+          </div>
+          <TableSkeleton rows={5} cols={5} />
+        </div>
+      }
+    >
+      <PaymentsContent />
+    </Suspense>
   );
 }

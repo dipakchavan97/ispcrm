@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import {
@@ -95,9 +96,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   GENERAL: 'General Query',
 };
 
-export default function TicketsPage() {
+function TicketsContent() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const searchParams = useSearchParams();
+  const queryCustomerId = searchParams?.get('customerId') || '';
+  const queryAction = searchParams?.get('action') || '';
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -191,7 +195,7 @@ export default function TicketsPage() {
     reset: resetCreateForm,
   } = useForm({
     defaultValues: {
-      customerId: '',
+      customerId: queryCustomerId || '',
       category: 'TECHNICAL',
       priority: 'MEDIUM',
       title: '',
@@ -199,6 +203,16 @@ export default function TicketsPage() {
       assignedTo: 'Support Desk',
     },
   });
+
+  useEffect(() => {
+    if (queryCustomerId) {
+      resetCreateForm((prev) => ({
+        ...prev,
+        customerId: queryCustomerId,
+      }));
+      setIsCreateModalOpen(true);
+    }
+  }, [queryCustomerId, resetCreateForm]);
 
   const onSubmitCreate = (data: any) => {
     if (!data.title.trim()) {
@@ -249,14 +263,14 @@ export default function TicketsPage() {
   const resolvedCount = tickets.filter((t) => t.status === 'RESOLVED' || t.status === 'CLOSED').length;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-slate-100 tracking-tight flex items-center gap-2.5">
-              <LifeBuoy className="h-6 w-6 text-amber-500" />
-              Subscriber Helpdesk & Support Tickets
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight flex items-center gap-2.5">
+              <LifeBuoy className="h-6 w-6 text-amber-500 shrink-0" />
+              <span>Subscriber Helpdesk & Support Tickets</span>
             </h1>
             <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -268,18 +282,18 @@ export default function TicketsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center flex-wrap gap-2.5">
           <button
             onClick={() => refetchTickets()}
             disabled={isRefetching}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? 'animate-spin text-blue-400' : ''}`} />
             <span>Refresh</span>
           </button>
           <button
             onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Open Ticket</span>
@@ -289,22 +303,22 @@ export default function TicketsPage() {
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg">
           <p className="text-[11px] font-medium uppercase text-slate-400">Open Tickets</p>
           <p className="text-2xl font-bold text-amber-400 mt-1">{openTicketsCount}</p>
           <p className="text-[10px] text-slate-500 mt-0.5">Awaiting staff diagnosis</p>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg">
           <p className="text-[11px] font-medium uppercase text-slate-400">In Progress</p>
           <p className="text-2xl font-bold text-blue-400 mt-1">{inProgressCount}</p>
           <p className="text-[10px] text-slate-500 mt-0.5">Assigned to technician</p>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg">
           <p className="text-[11px] font-medium uppercase text-slate-400">Urgent Escalations</p>
           <p className="text-2xl font-bold text-rose-400 mt-1">{urgentCount}</p>
           <p className="text-[10px] text-slate-500 mt-0.5">High priority SLA alerts</p>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg">
           <p className="text-[11px] font-medium uppercase text-slate-400">Resolved / Closed</p>
           <p className="text-2xl font-bold text-emerald-400 mt-1">{resolvedCount}</p>
           <p className="text-[10px] text-slate-500 mt-0.5">Tickets completed</p>
@@ -312,7 +326,7 @@ export default function TicketsPage() {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row gap-3 items-center justify-between">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row gap-3 items-center justify-between shadow-lg">
         <div className="relative w-full sm:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
           <input
@@ -320,15 +334,15 @@ export default function TicketsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search ticket #, subject, subscriber..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 min-h-[40px] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+            className="flex-1 sm:flex-initial bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 min-h-[40px] text-xs text-slate-300 focus:outline-none focus:border-blue-500"
           >
             <option value="ALL">All Statuses</option>
             <option value="OPEN">OPEN</option>
@@ -340,7 +354,7 @@ export default function TicketsPage() {
           <select
             value={priorityFilter}
             onChange={(e) => setPriorityFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+            className="flex-1 sm:flex-initial bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 min-h-[40px] text-xs text-slate-300 focus:outline-none focus:border-blue-500"
           >
             <option value="ALL">All Priorities</option>
             <option value="URGENT">URGENT</option>
@@ -352,7 +366,7 @@ export default function TicketsPage() {
       </div>
 
       {/* Tickets Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg min-w-0 w-full">
         {isLoadingTickets ? (
           <TableSkeleton rows={5} cols={5} />
         ) : paginatedTickets.length === 0 ? (
@@ -364,8 +378,8 @@ export default function TicketsPage() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+          <div className="overflow-x-auto w-full min-w-0">
+            <table className="w-full min-w-[760px] text-left text-xs">
               <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
                 <tr>
                   <th className="px-5 py-3">Ticket #</th>
@@ -437,7 +451,7 @@ export default function TicketsPage() {
                           e.stopPropagation();
                           setSelectedTicketId(t.id);
                         }}
-                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition-colors"
+                        className="px-3 py-1.5 min-h-[36px] rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition-colors"
                       >
                         View
                       </button>
@@ -451,20 +465,20 @@ export default function TicketsPage() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="px-5 py-3 bg-slate-950/40 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div className="p-3 sm:p-4 bg-slate-950/40 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
             <span>Page {page} of {totalPages}</span>
             <div className="flex gap-2">
               <button
                 disabled={page <= 1}
                 onClick={() => setPage(page - 1)}
-                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                className="px-3 py-2 min-h-[40px] rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
               >
                 Previous
               </button>
               <button
                 disabled={page >= totalPages}
                 onClick={() => setPage(page + 1)}
-                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                className="px-3 py-2 min-h-[40px] rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 transition-colors"
               >
                 Next
               </button>
@@ -475,31 +489,31 @@ export default function TicketsPage() {
 
       {/* Ticket Detail & Discussion Drawer Modal */}
       {selectedTicket && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
-              <div className="flex items-center gap-3">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[85vh] my-auto">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
                 <span className="font-mono font-bold text-blue-400 text-sm">{selectedTicket.ticketNumber}</span>
                 <StatusBadge status={selectedTicket.status} />
               </div>
               <button
                 onClick={() => setSelectedTicketId(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5 flex-1 text-xs">
               <div>
-                <h3 className="text-base font-bold text-white">{selectedTicket.title}</h3>
+                <h3 className="text-sm sm:text-base font-bold text-white">{selectedTicket.title}</h3>
                 <p className="text-xs text-slate-400 mt-1 leading-relaxed bg-slate-950 p-3 rounded-lg border border-slate-800">
                   {selectedTicket.description}
                 </p>
               </div>
 
               {selectedTicket.customer && (
-                <div className="p-3.5 rounded-lg bg-blue-950/20 border border-blue-800/30 flex items-center justify-between text-xs">
+                <div className="p-3.5 rounded-lg bg-blue-950/20 border border-blue-800/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                   <div>
                     <span className="font-semibold text-slate-200">{selectedTicket.customer.name}</span>
                     <span className="text-slate-400 font-mono block text-[11px]">
@@ -508,7 +522,7 @@ export default function TicketsPage() {
                   </div>
                   <Link
                     href={`/customers/${selectedTicket.customer.id}`}
-                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-medium"
+                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-medium min-h-[36px]"
                   >
                     <span>Customer 360</span>
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -518,21 +532,23 @@ export default function TicketsPage() {
 
               {/* Status Update Control */}
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-                <span className="text-xs text-slate-400 font-medium">Update Status:</span>
-                {(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as TicketStatus[]).map((st) => (
-                  <button
-                    key={st}
-                    disabled={selectedTicket.status === st || updateMutation.isPending}
-                    onClick={() => updateMutation.mutate({ id: selectedTicket.id, body: { status: st } })}
-                    className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer ${
-                      selectedTicket.status === st
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                    }`}
-                  >
-                    {st}
-                  </button>
-                ))}
+                <span className="text-xs text-slate-400 font-medium w-full sm:w-auto">Update Status:</span>
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  {(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as TicketStatus[]).map((st) => (
+                    <button
+                      key={st}
+                      disabled={selectedTicket.status === st || updateMutation.isPending}
+                      onClick={() => updateMutation.mutate({ id: selectedTicket.id, body: { status: st } })}
+                      className={`px-3 py-1.5 min-h-[36px] rounded text-[11px] font-semibold transition-all cursor-pointer ${
+                        selectedTicket.status === st
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Comments History */}
@@ -559,7 +575,7 @@ export default function TicketsPage() {
                 )}
 
                 {/* Add Comment Input */}
-                <div className="flex gap-2 pt-2">
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
                   <input
                     type="text"
                     value={newCommentContent}
@@ -570,12 +586,12 @@ export default function TicketsPage() {
                       }
                     }}
                     placeholder="Add diagnostic notes or operator comment..."
-                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   />
                   <button
                     disabled={!newCommentContent.trim() || addCommentMutation.isPending}
                     onClick={() => addCommentMutation.mutate({ id: selectedTicket.id, comment: newCommentContent.trim() })}
-                    className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-4 py-2 min-h-[40px] rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Send className="h-3.5 w-3.5" />
                     <span>Post</span>
@@ -589,27 +605,27 @@ export default function TicketsPage() {
 
       {/* Open Ticket Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-lg w-full max-h-[85vh] shadow-2xl overflow-hidden flex flex-col my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-6 shrink-0">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <LifeBuoy className="h-5 w-5 text-blue-500" />
-                Open Support Ticket
+                <LifeBuoy className="h-5 w-5 text-blue-500 shrink-0" />
+                <span>Open Support Ticket</span>
               </h3>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white min-h-[40px] min-w-[40px] flex items-center justify-center"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmitCreate)} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmitCreate)} className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Subscriber (Optional)</label>
                 <select
                   {...register('customerId')}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">General / Network Infrastructure Issue</option>
                   {customersData?.items?.map((c) => (
@@ -620,12 +636,12 @@ export default function TicketsPage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Category</label>
                   <select
                     {...register('category')}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white focus:outline-none focus:border-blue-500"
                   >
                     <option value="FIBER_CUT">Fiber Cut (LOS)</option>
                     <option value="SLOW_SPEED">Slow Speed</option>
@@ -641,7 +657,7 @@ export default function TicketsPage() {
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Priority</label>
                   <select
                     {...register('priority')}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white focus:outline-none focus:border-blue-500"
                   >
                     <option value="LOW">LOW</option>
                     <option value="MEDIUM">MEDIUM</option>
@@ -658,7 +674,7 @@ export default function TicketsPage() {
                   required
                   {...register('title')}
                   placeholder="e.g. Red Optical light blinking on ONT"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -679,22 +695,22 @@ export default function TicketsPage() {
                   type="text"
                   {...register('assignedTo')}
                   placeholder="Field Technician name"
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 min-h-[40px] text-xs text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2.5 sm:gap-3 pt-3 border-t border-slate-800 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsCreateModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
+                  className="px-4 py-2.5 min-h-[40px] rounded-lg border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={createMutation.isPending}
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg shadow-blue-600/30 disabled:opacity-50"
+                  className="px-4 py-2.5 min-h-[40px] rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-lg shadow-blue-600/30 disabled:opacity-50"
                 >
                   {createMutation.isPending ? 'Opening Ticket...' : 'Open Ticket'}
                 </button>
@@ -704,5 +720,20 @@ export default function TicketsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function TicketsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 max-w-[1440px] mx-auto pb-12 p-4 sm:p-6">
+          <div className="h-8 w-48 bg-slate-800 rounded-xl animate-pulse" />
+          <TableSkeleton rows={5} cols={5} />
+        </div>
+      }
+    >
+      <TicketsContent />
+    </Suspense>
   );
 }

@@ -5,7 +5,9 @@ import {
   Body,
   Param,
   Query,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InvoicesService } from './invoices.service';
 import { CurrentOrgId } from '../../common/decorators/current-org.decorator';
@@ -80,6 +82,31 @@ export class InvoicesController {
   @ApiOperation({ summary: 'Get Invoice Details & Line Items (Tenant Enforced)' })
   async getById(@CurrentOrgId() organizationId: string, @Param('id') id: string) {
     return this.invoicesService.getById(organizationId, id);
+  }
+
+  @Get(':id/pdf')
+  @Roles(
+    UserRole.ISP_OWNER,
+    UserRole.ISP_ADMIN,
+    UserRole.BILLING,
+    UserRole.SUPPORT,
+    UserRole.READ_ONLY,
+  )
+  @ApiOperation({ summary: 'Download or Preview Server-Generated GST Tax Invoice PDF (Tenant Enforced)' })
+  async downloadPdf(
+    @CurrentOrgId() organizationId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('preview') preview?: string,
+  ) {
+    const { buffer, filename } = await this.invoicesService.generatePdf(organizationId, id);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    const isPreview = preview === 'true' || preview === '1';
+    const dispositionType = isPreview ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${dispositionType}; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
   }
 
   @Post(':id/cancel')

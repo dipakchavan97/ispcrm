@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm, useFieldArray } from 'react-hook-form';
 import {
@@ -19,6 +20,7 @@ import {
   CreditCard,
   Ban,
   FileText,
+  FileDown,
   Trash2,
   Building,
   User,
@@ -29,7 +31,8 @@ import {
   Sparkles,
   ArrowRight,
 } from 'lucide-react';
-import { apiFetch } from '../../lib/api';
+import { apiFetch, downloadInvoicePdf } from '../../lib/api';
+import { useToast } from '../../components/Toast';
 import { StatusBadge } from '../../components/StatusBadge';
 import {
   calculateInvoiceTotals,
@@ -80,6 +83,9 @@ interface Invoice {
   paidAmount: string;
   balanceDue: string;
   status: string;
+  servicePeriodStart?: string | null;
+  servicePeriodEnd?: string | null;
+  source?: string;
   notes?: string | null;
   paidAt?: string | null;
   customer: {
@@ -114,13 +120,17 @@ interface CustomerOption {
   id: string;
   name: string;
   customerCode: string;
-  username: string;
   mobile: string;
-  state?: string;
+  username?: string;
 }
 
-export default function InvoicesPage() {
+function InvoicesContent() {
   const queryClient = useQueryClient();
+  const toast = useToast();
+  const searchParams = useSearchParams();
+  const queryCustomerId = searchParams?.get('customerId') || '';
+  const queryAction = searchParams?.get('action') || '';
+
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -136,14 +146,39 @@ export default function InvoicesPage() {
   const [checkoutStep, setCheckoutStep] = useState<'INITIAL' | 'PROCESSING' | 'SUCCESS' | 'ERROR'>('INITIAL');
   const [checkoutResult, setCheckoutResult] = useState<any>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  const handleDownloadPdf = async (invoiceId: string, invoiceNumber: string) => {
+    try {
+      setIsDownloadingPdf(true);
+      await downloadInvoicePdf(invoiceId, invoiceNumber);
+      toast.success(`Invoice ${invoiceNumber} downloaded successfully`, 'PDF Downloaded');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to download PDF', 'Download Error');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  // Effect to handle query actions (e.g. action=create with customerId)
+  useEffect(() => {
+    if (queryAction === 'create' && queryCustomerId) {
+      setIsCreateOpen(true);
+    }
+  }, [queryAction, queryCustomerId]);
 
   // 1. Fetch Invoices List
   const { data: invoicesData, isLoading } = useQuery({
-    queryKey: ['invoices', selectedStatus, searchQuery],
-    queryFn: () =>
-      apiFetch<{ items: Invoice[]; total: number; totalPages: number }>(
-        `/invoices?status=${selectedStatus}&search=${encodeURIComponent(searchQuery)}`,
-      ),
+    queryKey: ['invoices', selectedStatus, searchQuery, queryCustomerId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (selectedStatus !== 'ALL') params.set('status', selectedStatus);
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (queryCustomerId) params.set('customerId', queryCustomerId);
+      return apiFetch<{ items: Invoice[]; total: number; totalPages: number }>(
+        `/invoices?${params.toString()}`,
+      );
+    },
   });
 
   // 2. Fetch KPI Metrics
@@ -507,14 +542,14 @@ export default function InvoicesPage() {
           </div>
 
           {/* Search Input */}
-          <div className="relative min-w-[280px]">
+          <div className="relative w-full lg:w-auto lg:min-w-[280px]">
             <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search invoice #, customer, mobile..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950/70 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+              className="w-full bg-slate-950/70 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
             />
           </div>
         </div>
@@ -522,12 +557,13 @@ export default function InvoicesPage() {
 
       {/* Invoices Data Table */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
+        <div className="overflow-x-auto w-full min-w-0">
+          <table className="w-full text-left text-xs text-slate-300 min-w-[850px]">
             <thead className="bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
               <tr>
                 <th className="py-3 px-4">Invoice #</th>
                 <th className="py-3 px-4">Customer</th>
+                <th className="py-3 px-4">Service Period</th>
                 <th className="py-3 px-4">Invoice Date</th>
                 <th className="py-3 px-4">Due Date</th>
                 <th className="py-3 px-4 text-right">Subtotal</th>
@@ -541,13 +577,13 @@ export default function InvoicesPage() {
             <tbody className="divide-y divide-slate-800/60">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="py-8 text-center text-slate-500">
+                  <td colSpan={11} className="py-8 text-center text-slate-500">
                     Loading invoices ledger...
                   </td>
                 </tr>
               ) : !invoicesData?.items || invoicesData.items.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-10 text-center text-slate-500">
+                  <td colSpan={11} className="py-10 text-center text-slate-500">
                     <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     No invoices found matching current filter.
                   </td>
@@ -579,6 +615,27 @@ export default function InvoicesPage() {
                         <div className="text-[11px] text-slate-500 font-mono">
                           {inv.customer?.customerCode} • {inv.customer?.mobile || 'No mobile'}
                         </div>
+                      </td>
+                      <td className="py-3 px-4 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                        {inv.servicePeriodStart && inv.servicePeriodEnd ? (
+                          <div className="flex items-center gap-1.5 text-blue-400">
+                            <Calendar className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {new Date(inv.servicePeriodStart).toLocaleDateString('en-GB', {
+                                day: '2-digit',
+                                month: 'short',
+                              })}{' '}
+                              –{' '}
+                              {new Date(inv.servicePeriodEnd).toLocaleDateString('en-GB', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-slate-400">
                         {new Date(inv.invoiceDate).toLocaleDateString()}
@@ -633,6 +690,15 @@ export default function InvoicesPage() {
                             </button>
                           )}
                           <button
+                            disabled={isDownloadingPdf}
+                            onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition flex items-center gap-1"
+                            title="Download Vector GST PDF"
+                          >
+                            <FileDown className="w-3 h-3 text-emerald-400" />
+                            PDF
+                          </button>
+                          <button
                             onClick={() => handleOpenDetails(inv)}
                             className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition flex items-center gap-1"
                           >
@@ -654,10 +720,10 @@ export default function InvoicesPage() {
       {/* 1. INTERACTIVE ONLINE PAYMENT GATEWAY CHECKOUT MODAL        */}
       {/* ============================================================ */}
       {isOnlineCheckoutOpen && checkoutInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-indigo-900/60 to-slate-900 px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-indigo-900/60 to-slate-900 px-4 sm:px-6 py-4 border-b border-slate-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-emerald-500/20 border border-emerald-500/30 rounded-lg text-emerald-400">
                   <Zap className="w-5 h-5 fill-current" />
@@ -671,13 +737,13 @@ export default function InvoicesPage() {
               </div>
               <button
                 onClick={() => setIsOnlineCheckoutOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white min-h-[36px] min-w-[36px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-5 text-xs text-slate-300">
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 text-xs text-slate-300">
               {/* Invoice Summary Box */}
               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-800/80">
@@ -789,17 +855,17 @@ export default function InvoicesPage() {
                     <button
                       onClick={() => handleExecuteOnlineCheckout(false, false)}
                       disabled={checkoutStep === 'PROCESSING' || !checkoutIntent}
-                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                      className="w-full py-2.5 min-h-[42px] bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
                     >
                       <Zap className="w-4 h-4 fill-current" />
                       Pay ₹{checkoutInvoice.balanceDue} via Mock Gateway
                     </button>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       <button
                         onClick={() => handleExecuteOnlineCheckout(false, true)}
                         disabled={checkoutStep === 'PROCESSING' || !checkoutIntent}
-                        className="py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1"
+                        className="py-2 min-h-[38px] bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1"
                         title="Simulate payment signature failure"
                       >
                         <ShieldAlert className="w-3.5 h-3.5" />
@@ -811,7 +877,7 @@ export default function InvoicesPage() {
                           setIsOnlineCheckoutOpen(false);
                           handleOpenManualPayment(checkoutInvoice);
                         }}
-                        className="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
+                        className="py-2 min-h-[38px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
                       >
                         Switch to Manual / Cash
                       </button>
@@ -822,7 +888,7 @@ export default function InvoicesPage() {
                     {/* Test Duplicate Callback Button */}
                     <button
                       onClick={() => handleExecuteOnlineCheckout(true, false)}
-                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg text-xs transition flex items-center justify-center gap-2 shadow"
+                      className="w-full py-2.5 min-h-[40px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg text-xs transition flex items-center justify-center gap-2 shadow"
                     >
                       <Copy className="w-3.5 h-3.5" />
                       Test Duplicate Callback (Verify Idempotency)
@@ -830,7 +896,7 @@ export default function InvoicesPage() {
 
                     <button
                       onClick={() => setIsOnlineCheckoutOpen(false)}
-                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
+                      className="w-full py-2.5 min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
                     >
                       Done & Close
                     </button>
@@ -846,23 +912,23 @@ export default function InvoicesPage() {
       {/* 2. INVOICE DETAILS & PRINTABLE GST TAX INVOICE MODAL         */}
       {/* ============================================================ */}
       {isDetailsOpen && selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
             {/* Modal Actions Bar (hidden on print) */}
-            <div className="sticky top-0 bg-slate-950/90 backdrop-blur px-6 py-4 border-b border-slate-800 flex items-center justify-between z-10 print:hidden">
+            <div className="sticky top-0 bg-slate-950/90 backdrop-blur px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 z-10 print:hidden shrink-0">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-indigo-400" />
-                <span className="font-semibold text-white">
+                <span className="font-semibold text-white text-sm">
                   Tax Invoice: {selectedInvoice.invoiceNumber}
                 </span>
                 <StatusBadge status={selectedInvoice.status} />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {/* Prominent Online Pay Button */}
                 {selectedInvoice.status !== 'PAID' && selectedInvoice.status !== 'CANCELLED' && (
                   <button
                     onClick={() => handleOpenOnlineCheckout(selectedInvoice)}
-                    className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition flex items-center gap-1.5 shadow-sm shadow-emerald-500/20"
+                    className="px-3 py-1.5 min-h-[36px] bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition flex items-center gap-1.5 shadow-sm shadow-emerald-500/20"
                   >
                     <Zap className="w-3.5 h-3.5 fill-current" />
                     Pay Online
@@ -871,7 +937,7 @@ export default function InvoicesPage() {
                 {selectedInvoice.status !== 'PAID' && selectedInvoice.status !== 'CANCELLED' && (
                   <button
                     onClick={() => handleOpenManualPayment(selectedInvoice)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition flex items-center gap-1.5"
+                    className="px-3 py-1.5 min-h-[36px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition flex items-center gap-1.5"
                   >
                     <CreditCard className="w-3.5 h-3.5" />
                     Record Cash/UPI
@@ -884,22 +950,30 @@ export default function InvoicesPage() {
                         cancelInvoiceMutation.mutate({ id: selectedInvoice.id });
                       }
                     }}
-                    className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1"
+                    className="px-3 py-1.5 min-h-[36px] bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1"
                   >
                     <Ban className="w-3.5 h-3.5" />
                     Cancel
                   </button>
                 )}
                 <button
+                  disabled={isDownloadingPdf}
+                  onClick={() => handleDownloadPdf(selectedInvoice.id, selectedInvoice.invoiceNumber)}
+                  className="px-3 py-1.5 min-h-[36px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 disabled:opacity-50"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  {isDownloadingPdf ? 'Downloading...' : 'Download PDF'}
+                </button>
+                <button
                   onClick={() => window.print()}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5"
+                  className="px-3 py-1.5 min-h-[36px] bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  Print / PDF
+                  Print
                 </button>
                 <button
                   onClick={() => setIsDetailsOpen(false)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition min-h-[36px] min-w-[36px] flex items-center justify-center"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -907,7 +981,7 @@ export default function InvoicesPage() {
             </div>
 
             {/* Printable Tax Invoice Document Container */}
-            <div className="p-8 space-y-6 text-slate-200" id="printable-invoice">
+            <div className="p-4 sm:p-8 space-y-6 text-slate-200 overflow-y-auto flex-1" id="printable-invoice">
               {/* Top Header: ISP Info & Tax Invoice Title */}
               <div className="flex flex-col sm:flex-row justify-between items-start pb-6 border-b border-slate-800 gap-4">
                 <div>
@@ -931,7 +1005,7 @@ export default function InvoicesPage() {
                   </p>
                 </div>
 
-                <div className="text-right sm:self-start">
+                <div className="text-left sm:text-right sm:self-start">
                   <span className="text-xs font-bold uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded border border-indigo-500/20">
                     GST TAX INVOICE
                   </span>
@@ -998,9 +1072,48 @@ export default function InvoicesPage() {
                 </div>
               </div>
 
+              {/* Mandatory Service / Billing Period Display */}
+              <div className="p-4 bg-blue-950/30 border border-blue-800/40 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <Calendar className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-blue-400 block">
+                      Service / Billing Period
+                    </span>
+                    <strong className="text-xs font-mono text-slate-100">
+                      {selectedInvoice.servicePeriodStart && selectedInvoice.servicePeriodEnd ? (
+                        <>
+                          {new Date(selectedInvoice.servicePeriodStart).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                          })}{' '}
+                          –{' '}
+                          {new Date(selectedInvoice.servicePeriodEnd).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </>
+                      ) : (
+                        'Standard Monthly Subscription Cycle'
+                      )}
+                    </strong>
+                  </div>
+                </div>
+
+                {selectedInvoice.source && (
+                  <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                    Source: <strong className="text-slate-200">{selectedInvoice.source}</strong>
+                  </span>
+                )}
+              </div>
+
               {/* Invoice Line Items Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
-                <table className="w-full text-left text-xs">
+              <div className="overflow-x-auto w-full min-w-0 rounded-xl border border-slate-800">
+                <table className="w-full text-left text-xs min-w-[650px]">
                   <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
                     <tr>
                       <th className="py-2.5 px-3">#</th>
@@ -1167,16 +1280,16 @@ export default function InvoicesPage() {
       {/* 3. CREATE INVOICE MODAL                                      */}
       {/* ============================================================ */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-6 pb-4 shrink-0">
               <div className="flex items-center gap-2">
                 <Receipt className="w-6 h-6 text-indigo-400" />
                 <h2 className="text-lg font-bold text-white">Create GST Invoice</h2>
               </div>
               <button
                 onClick={() => setIsCreateOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white min-h-[36px] min-w-[36px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1196,211 +1309,219 @@ export default function InvoicesPage() {
                   })),
                 }),
               )}
-              className="space-y-5"
+              className="flex-1 flex flex-col min-h-0 overflow-hidden"
             >
-              {/* Customer & Dates */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1 sm:col-span-1">
-                  <label className="text-xs font-medium text-slate-300">Select Customer *</label>
-                  <select
-                    {...registerInvoice('customerId', { required: true })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="">-- Choose Subscriber --</option>
-                    {customersData?.items?.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.customerCode} - {c.username})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300">Due Date *</label>
-                  <input
-                    type="date"
-                    {...registerInvoice('dueDate', { required: true })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300">Invoice Status</label>
-                  <select
-                    {...registerInvoice('status')}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="ISSUED">ISSUED (Standard)</option>
-                    <option value="DRAFT">DRAFT (Not Finalized)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Line Items Builder */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                    Line Items (SAC 998422)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      append({
-                        description: 'Fiber Internet Service Addon',
-                        sacCode: '998422',
-                        quantity: 1,
-                        unitPrice: 500,
-                        discountAmount: 0,
-                        taxRatePercent: 18,
-                      })
-                    }
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-400 hover:text-white rounded text-xs transition flex items-center gap-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Item
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {fields.map((field, index) => (
-                    <div
-                      key={field.id}
-                      className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5">
+                {/* Customer & Dates */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1 sm:col-span-1">
+                    <label className="text-xs font-medium text-slate-300">Select Customer *</label>
+                    <select
+                      {...registerInvoice('customerId', { required: true })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                     >
-                      <div className="sm:col-span-4">
-                        <input
-                          type="text"
-                          placeholder="Description"
-                          {...registerInvoice(`items.${index}.description` as const, {
-                            required: true,
-                          })}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          placeholder="SAC Code"
-                          {...registerInvoice(`items.${index}.sacCode` as const)}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white font-mono"
-                        />
-                      </div>
-                      <div className="sm:col-span-1">
-                        <input
-                          type="number"
-                          placeholder="Qty"
-                          min="1"
-                          {...registerInvoice(`items.${index}.quantity` as const, {
-                            valueAsNumber: true,
-                          })}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-center font-mono"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Unit Price (₹)"
-                          {...registerInvoice(`items.${index}.unitPrice` as const, {
-                            valueAsNumber: true,
-                          })}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-right font-mono"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Disc. (₹)"
-                          {...registerInvoice(`items.${index}.discountAmount` as const, {
-                            valueAsNumber: true,
-                          })}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-right font-mono"
-                        />
-                      </div>
-                      <div className="sm:col-span-1 flex justify-center">
-                        {fields.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => remove(index)}
-                            className="p-1.5 text-rose-400 hover:bg-rose-500/20 rounded transition"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                      <option value="">-- Choose Subscriber --</option>
+                      {customersData?.items?.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.customerCode}{c.username ? ` - ${c.username}` : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Invoice-level Discount & Notes */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300">Invoice Discount (₹)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    {...registerInvoice('discountAmount', { valueAsNumber: true })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300">Notes / Memo</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Monthly subscription bill"
-                    {...registerInvoice('notes')}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
-              </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">Due Date *</label>
+                    <input
+                      type="date"
+                      {...registerInvoice('dueDate', { required: true })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
 
-              {/* Real-time Decimal Calculation Preview */}
-              {liveTotals && (
-                <div className="p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-xl space-y-2 text-xs">
-                  <p className="font-semibold text-indigo-300 uppercase tracking-wider text-[11px]">
-                    Live Decimal & GST Calculation Preview (Zero Float Drift)
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
-                    <div>
-                      <span className="text-slate-400 block">Subtotal:</span>
-                      <span className="text-white font-bold">₹{liveTotals.subtotal}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">CGST (9%) + SGST (9%):</span>
-                      <span className="text-white font-bold">
-                        ₹{liveTotals.cgstAmount} + ₹{liveTotals.sgstAmount}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Total GST (18%):</span>
-                      <span className="text-white font-bold">₹{liveTotals.totalTaxAmount}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Grand Total:</span>
-                      <span className="text-indigo-400 font-bold text-sm">
-                        ₹{liveTotals.totalAmount}
-                      </span>
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">Invoice Status</label>
+                    <select
+                      {...registerInvoice('status')}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="ISSUED">ISSUED (Standard)</option>
+                      <option value="DRAFT">DRAFT (Not Finalized)</option>
+                    </select>
                   </div>
                 </div>
-              )}
+
+                {/* Line Items Builder */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+                      Line Items (SAC 998422)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        append({
+                          description: 'Fiber Internet Service Addon',
+                          sacCode: '998422',
+                          quantity: 1,
+                          unitPrice: 500,
+                          discountAmount: 0,
+                          taxRatePercent: 18,
+                        })
+                      }
+                      className="px-2.5 py-1 min-h-[36px] bg-slate-800 hover:bg-slate-700 text-indigo-400 hover:text-white rounded text-xs transition flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Item
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {fields.map((field, index) => (
+                      <div
+                        key={field.id}
+                        className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
+                      >
+                        <div className="sm:col-span-4">
+                          <label className="block sm:hidden text-[10px] text-slate-400 mb-0.5">Description</label>
+                          <input
+                            type="text"
+                            placeholder="Description"
+                            {...registerInvoice(`items.${index}.description` as const, {
+                              required: true,
+                            })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5 text-xs text-white"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block sm:hidden text-[10px] text-slate-400 mb-0.5">SAC Code</label>
+                          <input
+                            type="text"
+                            placeholder="SAC Code"
+                            {...registerInvoice(`items.${index}.sacCode` as const)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                        <div className="sm:col-span-1">
+                          <label className="block sm:hidden text-[10px] text-slate-400 mb-0.5">Quantity</label>
+                          <input
+                            type="number"
+                            placeholder="Qty"
+                            min="1"
+                            {...registerInvoice(`items.${index}.quantity` as const, {
+                              valueAsNumber: true,
+                            })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-center font-mono"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block sm:hidden text-[10px] text-slate-400 mb-0.5">Unit Price (₹)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Unit Price (₹)"
+                            {...registerInvoice(`items.${index}.unitPrice` as const, {
+                              valueAsNumber: true,
+                            })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-right font-mono"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block sm:hidden text-[10px] text-slate-400 mb-0.5">Discount (₹)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Disc. (₹)"
+                            {...registerInvoice(`items.${index}.discountAmount` as const, {
+                              valueAsNumber: true,
+                            })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-white text-right font-mono"
+                          />
+                        </div>
+                        <div className="sm:col-span-1 flex justify-center pt-1 sm:pt-0">
+                          {fields.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => remove(index)}
+                              className="p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center text-rose-400 hover:bg-rose-500/20 rounded transition"
+                              title="Delete Item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Invoice-level Discount & Notes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">Invoice Discount (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      {...registerInvoice('discountAmount', { valueAsNumber: true })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">Notes / Memo</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Monthly subscription bill"
+                      {...registerInvoice('notes')}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Real-time Decimal Calculation Preview */}
+                {liveTotals && (
+                  <div className="p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-xl space-y-2 text-xs">
+                    <p className="font-semibold text-indigo-300 uppercase tracking-wider text-[11px]">
+                      Live Decimal & GST Calculation Preview (Zero Float Drift)
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
+                      <div>
+                        <span className="text-slate-400 block">Subtotal:</span>
+                        <span className="text-white font-bold">₹{liveTotals.subtotal}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block">CGST (9%) + SGST (9%):</span>
+                        <span className="text-white font-bold">
+                          ₹{liveTotals.cgstAmount} + ₹{liveTotals.sgstAmount}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block">Total GST (18%):</span>
+                        <span className="text-white font-bold">₹{liveTotals.totalTaxAmount}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block">Grand Total:</span>
+                        <span className="text-indigo-400 font-bold text-sm">
+                          ₹{liveTotals.totalAmount}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Submit / Cancel Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-3 p-4 sm:p-6 border-t border-slate-800 shrink-0 bg-slate-900">
                 <button
                   type="button"
                   onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
+                  className="px-4 py-2 min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={createInvoiceMutation.isPending}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition flex items-center gap-2 shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                  className="px-5 py-2 min-h-[40px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium transition flex items-center gap-2 shadow-lg shadow-indigo-600/20 disabled:opacity-50"
                 >
                   {createInvoiceMutation.isPending ? 'Generating Invoice...' : 'Generate Invoice'}
                 </button>
@@ -1414,44 +1535,19 @@ export default function InvoicesPage() {
       {/* 4. RECORD MANUAL PAYMENT MODAL                               */}
       {/* ============================================================ */}
       {isPaymentOpen && paymentInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-6 pb-3 shrink-0">
               <div className="flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-emerald-400" />
                 <h2 className="text-base font-bold text-white">Record Manual Payment</h2>
               </div>
               <button
                 onClick={() => setIsPaymentOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white min-h-[36px] min-w-[36px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
-            </div>
-
-            <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Invoice #:</span>
-                <span className="font-mono font-bold text-indigo-400">
-                  {paymentInvoice.invoiceNumber}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Customer:</span>
-                <span className="text-white font-medium">{paymentInvoice.customer.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Total Invoiced:</span>
-                <span className="font-mono text-white">₹{paymentInvoice.totalAmount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Already Paid:</span>
-                <span className="font-mono text-emerald-400">₹{paymentInvoice.paidAmount}</span>
-              </div>
-              <div className="border-t border-slate-800/80 pt-1.5 flex justify-between font-bold">
-                <span className="text-amber-400">Balance Due:</span>
-                <span className="font-mono text-amber-400">₹{paymentInvoice.balanceDue}</span>
-              </div>
             </div>
 
             <form
@@ -1465,89 +1561,116 @@ export default function InvoicesPage() {
                   notes: data.notes,
                 }),
               )}
-              className="space-y-4 text-xs"
+              className="flex-1 flex flex-col min-h-0 overflow-hidden"
             >
-              <div className="space-y-1">
-                <label className="font-medium text-slate-300">Payment Amount (₹) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  {...registerPayment('amount', { required: true })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-medium text-slate-300">Payment Method *</label>
-                <select
-                  {...registerPayment('paymentMethod', { required: true })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="UPI">UPI / QR Code</option>
-                  <option value="CASH">Cash Collection</option>
-                  <option value="BANK_TRANSFER">Bank Transfer / NEFT / IMPS</option>
-                  <option value="ONLINE_GATEWAY">Online Gateway (Razorpay / PayU)</option>
-                  <option value="CHEQUE">Cheque / Demand Draft</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-medium text-slate-300">Transaction Reference / UTR #</label>
-                <input
-                  type="text"
-                  placeholder="e.g. UPI-938491028301"
-                  {...registerPayment('transactionRef')}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-medium text-slate-300">Notes / Remarks</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Paid in cash at office"
-                  {...registerPayment('notes')}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              {/* Settlement Preview */}
-              {liveSettlement && (
-                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg font-mono text-[11px] space-y-1">
-                  {'error' in liveSettlement ? (
-                    <p className="text-rose-400 font-sans">{liveSettlement.error}</p>
-                  ) : (
-                    <>
-                      <div className="flex justify-between text-slate-400">
-                        <span>New Paid Amount:</span>
-                        <span className="text-white">₹{liveSettlement.newPaidAmount}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>Remaining Balance:</span>
-                        <span className="text-white">₹{liveSettlement.balanceDue}</span>
-                      </div>
-                      <div className="flex justify-between font-bold pt-1 border-t border-slate-800">
-                        <span>Target Status:</span>
-                        <span
-                          className={
-                            liveSettlement.targetStatus === 'PAID'
-                              ? 'text-emerald-400'
-                              : 'text-amber-400'
-                          }
-                        >
-                          {liveSettlement.targetStatus}
-                        </span>
-                      </div>
-                    </>
-                  )}
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+                <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Invoice #:</span>
+                    <span className="font-mono font-bold text-indigo-400">
+                      {paymentInvoice.invoiceNumber}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Customer:</span>
+                    <span className="text-white font-medium">{paymentInvoice.customer.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Total Invoiced:</span>
+                    <span className="font-mono text-white">₹{paymentInvoice.totalAmount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Already Paid:</span>
+                    <span className="font-mono text-emerald-400">₹{paymentInvoice.paidAmount}</span>
+                  </div>
+                  <div className="border-t border-slate-800/80 pt-1.5 flex justify-between font-bold">
+                    <span className="text-amber-400">Balance Due:</span>
+                    <span className="font-mono text-amber-400">₹{paymentInvoice.balanceDue}</span>
+                  </div>
                 </div>
-              )}
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <div className="space-y-1">
+                  <label className="font-medium text-slate-300">Payment Amount (₹) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    {...registerPayment('amount', { required: true })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-medium text-slate-300">Payment Method *</label>
+                  <select
+                    {...registerPayment('paymentMethod', { required: true })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="UPI">UPI / QR Code</option>
+                    <option value="CASH">Cash Collection</option>
+                    <option value="BANK_TRANSFER">Bank Transfer / NEFT / IMPS</option>
+                    <option value="ONLINE_GATEWAY">Online Gateway (Razorpay / PayU)</option>
+                    <option value="CHEQUE">Cheque / Demand Draft</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-medium text-slate-300">Transaction Reference / UTR #</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. UPI-938491028301"
+                    {...registerPayment('transactionRef')}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-medium text-slate-300">Notes / Remarks</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Paid in cash at office"
+                    {...registerPayment('notes')}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* Settlement Preview */}
+                {liveSettlement && (
+                  <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg font-mono text-[11px] space-y-1">
+                    {'error' in liveSettlement ? (
+                      <p className="text-rose-400 font-sans">{liveSettlement.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex justify-between text-slate-400">
+                          <span>New Paid Amount:</span>
+                          <span className="text-white">₹{liveSettlement.newPaidAmount}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                          <span>Remaining Balance:</span>
+                          <span className="text-white">₹{liveSettlement.balanceDue}</span>
+                        </div>
+                        <div className="flex justify-between font-bold pt-1 border-t border-slate-800">
+                          <span>Target Status:</span>
+                          <span
+                            className={
+                              liveSettlement.targetStatus === 'PAID'
+                                ? 'text-emerald-400'
+                                : 'text-amber-400'
+                            }
+                          >
+                            {liveSettlement.targetStatus}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 p-4 sm:p-6 border-t border-slate-800 shrink-0 bg-slate-900">
                 <button
                   type="button"
                   onClick={() => setIsPaymentOpen(false)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                  className="px-4 py-2 min-h-[40px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
                 >
                   Cancel
                 </button>
@@ -1557,7 +1680,7 @@ export default function InvoicesPage() {
                     recordPaymentMutation.isPending ||
                     Boolean(liveSettlement && 'error' in liveSettlement)
                   }
-                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                  className="px-5 py-2 min-h-[40px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
                 >
                   {recordPaymentMutation.isPending ? 'Processing...' : 'Settle Payment'}
                 </button>
@@ -1567,5 +1690,24 @@ export default function InvoicesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function InvoicesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 max-w-[1440px] mx-auto pb-12 p-4 sm:p-6">
+          <div className="h-8 w-48 bg-slate-800 rounded-xl animate-pulse" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <InvoicesContent />
+    </Suspense>
   );
 }
