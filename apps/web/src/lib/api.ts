@@ -100,3 +100,335 @@ export async function apiFetch<T = any>(
 
   return json.data !== undefined ? json.data : (json as unknown as T);
 }
+
+/**
+ * Fetch invoice PDF as a Blob using authenticated Bearer token and validate integrity.
+ */
+async function fetchInvoicePdfBlob(invoiceId: string, preview = false): Promise<Blob> {
+  const token = getAuthToken();
+  if (!token) {
+    redirectToLogin();
+    throw new Error('Authentication required. Please log in again.');
+  }
+
+  const headers: Record<string, string> = {
+    Accept: 'application/pdf',
+    Authorization: `Bearer ${token}`,
+  };
+
+  const orgId = typeof window !== 'undefined' ? localStorage.getItem('currentOrgId') || '' : '';
+  if (orgId) {
+    headers['x-organization-id'] = orgId;
+  }
+
+  const apiBase = getApiBase();
+  const url = `${apiBase}/invoices/${encodeURIComponent(invoiceId)}/pdf${preview ? '?preview=true' : ''}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (err: any) {
+    throw new Error(`Network error connecting to invoice PDF server: ${err.message || 'Unable to connect'}`);
+  }
+
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new Error('Session expired or unauthorized. Please log in again.');
+  }
+
+  if (!response.ok) {
+    let errorMsg = `Failed to generate PDF on server (HTTP ${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error?.message) {
+        errorMsg = errJson.error.message;
+      } else if (errJson?.message) {
+        errorMsg = errJson.message;
+      }
+    } catch {
+      // Not JSON, ignore
+    }
+    throw new Error(errorMsg);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/pdf')) {
+    throw new Error(`Invalid response format from server: expected application/pdf, received ${contentType || 'unknown'}`);
+  }
+
+  const blob = await response.blob();
+
+  // Validate PDF magic bytes (%PDF- : 0x25, 0x50, 0x44, 0x46, 0x2d)
+  const magicBytes = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+  const isPdf =
+    magicBytes.length >= 5 &&
+    magicBytes[0] === 0x25 &&
+    magicBytes[1] === 0x50 &&
+    magicBytes[2] === 0x44 &&
+    magicBytes[3] === 0x46 &&
+    magicBytes[4] === 0x2d;
+
+  if (!isPdf) {
+    throw new Error('Server returned corrupted or invalid PDF data (missing %PDF- header).');
+  }
+
+  return blob;
+}
+
+/**
+ * Download invoice PDF with authenticated Bearer token and proper filename.
+ */
+export async function downloadInvoicePdf(invoiceId: string, invoiceNumber: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const blob = await fetchInvoicePdfBlob(invoiceId, false);
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  try {
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    // Sanitize filename
+    const safeInvNum = (invoiceNumber || invoiceId).replace(/[^a-zA-Z0-9-_]/g, '_');
+    a.download = `INVOICE-${safeInvNum}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Keep alive for 60 seconds to ensure mobile browsers (Android Chrome, iOS Safari) finish saving
+    setTimeout(() => {
+      try {
+        window.URL.revokeObjectURL(blobUrl);
+      } catch {}
+    }, 60000);
+  }
+}
+
+/**
+ * Open the generated A4 vector PDF in a new browser tab for preview.
+ * Uses the browser's native vector PDF viewer.
+ */
+export async function previewInvoicePdf(invoiceId: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const blob = await fetchInvoicePdfBlob(invoiceId, true);
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  const pdfWindow = window.open(blobUrl, '_blank');
+  if (!pdfWindow || pdfWindow.closed || typeof pdfWindow.closed === 'undefined') {
+    window.URL.revokeObjectURL(blobUrl);
+    throw new Error(
+      'Popup blocked: Please allow popups for this site in your browser to view the invoice PDF.'
+    );
+  }
+
+  try {
+    pdfWindow.focus();
+  } catch {}
+
+  // Keep the blob URL alive for 3 minutes so the PDF viewer can buffer and render without premature revocation
+  setTimeout(() => {
+    try {
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {}
+  }, 180000);
+}
+
+/**
+ * Open the generated A4 vector PDF in a new browser tab for printing.
+ * Attempts to trigger the native PDF viewer print dialog if permitted,
+ * while ensuring the user can print directly from the opened PDF document.
+ * NEVER prints the HTML webpage.
+ */
+export async function printInvoicePdf(invoiceId: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const blob = await fetchInvoicePdfBlob(invoiceId, true);
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  const pdfWindow = window.open(blobUrl, '_blank');
+  if (!pdfWindow || pdfWindow.closed || typeof pdfWindow.closed === 'undefined') {
+    window.URL.revokeObjectURL(blobUrl);
+    throw new Error(
+      'Popup blocked: Please allow popups for this site in your browser to print the invoice PDF.'
+    );
+  }
+
+  // Attempt to trigger print from the opened PDF context if permitted
+  try {
+    pdfWindow.focus();
+    setTimeout(() => {
+      try {
+        if (!pdfWindow.closed) {
+          pdfWindow.print();
+        }
+      } catch {
+        // PDF viewer plugin sandboxing or cross-context restrictions prevent script-driven print;
+        // The PDF is loaded and visible in the tab, user uses the viewer's native print button.
+      }
+    }, 800);
+  } catch {
+    // Handled gracefully; PDF remains open for user printing
+  }
+
+  // Keep the blob URL alive for 3 minutes so the user has ample time to review and print
+  setTimeout(() => {
+    try {
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {}
+  }, 180000);
+}
+
+/**
+ * Fetch Customer Application Form (CAF) PDF as a Blob using authenticated Bearer token and validate integrity.
+ * @param customerId - Target customer ID
+ * @param preview - true for in-browser preview (inline Content-Disposition), false for download (attachment)
+ */
+export async function fetchCafPdfBlob(customerId: string, preview = false): Promise<Blob> {
+  const token = getAuthToken();
+  if (!token) {
+    redirectToLogin();
+    throw new Error('Authentication required. Please log in again.');
+  }
+
+  const headers: Record<string, string> = {
+    Accept: 'application/pdf',
+    Authorization: `Bearer ${token}`,
+  };
+
+  const orgId = typeof window !== 'undefined' ? localStorage.getItem('currentOrgId') || '' : '';
+  if (orgId) {
+    headers['x-organization-id'] = orgId;
+  }
+
+  const apiBase = getApiBase();
+  const url = `${apiBase}/customers/${encodeURIComponent(customerId)}/caf.pdf?preview=${preview ? '1' : '0'}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (err: any) {
+    throw new Error(`Network error connecting to CAF server: ${err.message || 'Unable to connect'}`);
+  }
+
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new Error('Session expired or unauthorized. Please log in again.');
+  }
+
+  if (response.status === 403) {
+    throw new Error('Access denied. You do not have permission to view or generate this Customer Application Form.');
+  }
+
+  if (response.status === 404) {
+    throw new Error('Customer or application form not found.');
+  }
+
+  if (!response.ok) {
+    let errorMsg = `Failed to generate CAF PDF on server (HTTP ${response.status})`;
+    try {
+      const errJson = await response.json();
+      if (errJson?.error?.message) {
+        errorMsg = errJson.error.message;
+      } else if (errJson?.message) {
+        errorMsg = errJson.message;
+      }
+    } catch {
+      // Not JSON, ignore
+    }
+    throw new Error(errorMsg);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/pdf')) {
+    throw new Error(`Invalid response format from server: expected application/pdf, received ${contentType || 'unknown'}`);
+  }
+
+  const blob = await response.blob();
+
+  // Validate PDF magic bytes (%PDF- : 0x25, 0x50, 0x44, 0x46, 0x2d)
+  const magicBytes = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+  const isPdf =
+    magicBytes.length >= 5 &&
+    magicBytes[0] === 0x25 &&
+    magicBytes[1] === 0x50 &&
+    magicBytes[2] === 0x44 &&
+    magicBytes[3] === 0x46 &&
+    magicBytes[4] === 0x2d;
+
+  if (!isPdf) {
+    throw new Error('Server returned corrupted or invalid PDF data (missing %PDF- header).');
+  }
+
+  return blob;
+}
+
+/**
+ * Download Customer Application Form (CAF) PDF with authenticated Bearer token and safe customer filename.
+ * Does NOT place Aadhaar, passwords, secrets, or sensitive tokens in the filename.
+ */
+export async function downloadCafPdf(
+  customerId: string,
+  customerCode: string,
+  customerName?: string
+): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const blob = await fetchCafPdfBlob(customerId, false);
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  try {
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    // Sanitize filename using only safe identifiers
+    const safeCode = (customerCode || customerId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = customerName
+      ? customerName
+          .trim()
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .substring(0, 30)
+      : '';
+    a.download = safeName ? `CAF-${safeCode}-${safeName}.pdf` : `CAF-${safeCode}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    // Keep alive for 60 seconds to ensure mobile and desktop download queues finish saving
+    setTimeout(() => {
+      try {
+        window.URL.revokeObjectURL(blobUrl);
+      } catch {}
+    }, 60000);
+  }
+}
+
+/**
+ * Open the generated A4 vector CAF PDF in a new browser tab for preview.
+ * Uses the browser's native vector PDF viewer.
+ */
+export async function previewCafPdf(customerId: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const blob = await fetchCafPdfBlob(customerId, true);
+  const blobUrl = window.URL.createObjectURL(blob);
+
+  const pdfWindow = window.open(blobUrl, '_blank');
+  if (!pdfWindow || pdfWindow.closed || typeof pdfWindow.closed === 'undefined') {
+    window.URL.revokeObjectURL(blobUrl);
+    throw new Error(
+      'Popup blocked: Please allow popups for this site in your browser to view the CAF PDF.'
+    );
+  }
+
+  try {
+    pdfWindow.focus();
+  } catch {}
+
+  // Keep the blob URL alive for 3 minutes so the PDF viewer can buffer and render without premature revocation
+  setTimeout(() => {
+    try {
+      window.URL.revokeObjectURL(blobUrl);
+    } catch {}
+  }, 180000);
+}
