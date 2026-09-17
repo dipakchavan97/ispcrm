@@ -282,8 +282,8 @@ test('Live RADIUS Access Request Log Test Suite', async (t) => {
       }),
     );
 
-    // Permitted roles (Tenant staff + global Super Admin)
-    for (const role of [...endpointRoles, UserRole.SUPER_ADMIN]) {
+    // Permitted roles (Tenant staff)
+    for (const role of endpointRoles) {
       const { context } = createMockContext({ user: { role, organizationId: orgA.id } }, {
         [ROLES_KEY]: endpointRoles,
       });
@@ -291,6 +291,15 @@ test('Live RADIUS Access Request Log Test Suite', async (t) => {
       assert.equal(canActivate, true, `Role ${role} should be permitted to view access requests`);
     }
 
+    // Decommissioned SUPER_ADMIN cannot access
+    const { context: saContext } = createMockContext({ user: { role: UserRole.SUPER_ADMIN, organizationId: orgA.id } }, {
+      [ROLES_KEY]: endpointRoles,
+    });
+    assert.throws(
+      () => rolesGuard.canActivate(saContext),
+      /Access denied/,
+      'Decommissioned SUPER_ADMIN should be rejected with ForbiddenException',
+    );
 
     // Unauthorized role (e.g. empty user or custom unpermitted role)
     const { context: unauthContext } = createMockContext({ user: { role: 'UNAUTHORIZED_ROLE' } }, {

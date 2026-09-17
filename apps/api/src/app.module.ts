@@ -14,6 +14,7 @@ import { RadiusModule } from './modules/radius/radius.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
+import { ZonesModule } from './modules/zones/zones.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
@@ -38,6 +39,7 @@ import { SecurityHeadersMiddleware } from './common/middleware/security.middlewa
     RadiusModule,
     AuditModule,
     TicketsModule,
+    ZonesModule,
   ],
   providers: [
     // Rate limiter guard executes FIRST to throttle requests before running CPU/DB work

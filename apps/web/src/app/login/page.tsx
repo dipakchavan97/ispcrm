@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Eye, EyeOff, Lock, Mail, ShieldAlert, ArrowRight, Radio } from 'lucide-react';
 import { getAuthToken, setAuthToken, getApiBase } from '../../lib/api';
 
@@ -91,28 +92,28 @@ export default function LoginPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#070d1e] flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+    <div className="min-h-screen bg-[#070d1e] flex flex-col justify-center py-8 sm:py-12 px-3 sm:px-6 lg:px-8 text-slate-100 overflow-x-hidden">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md px-1">
         <div className="flex justify-center items-center gap-3">
-          <div className="h-12 w-12 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/30">
-            <Radio className="h-6 w-6 text-white" />
+          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/30 shrink-0">
+            <Radio className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
           </div>
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight text-white">ISP CRM & Billing</h2>
-            <p className="text-xs text-blue-400 font-mono">Carrier Operations & Network Automation</p>
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white truncate">ISP CRM & Billing</h2>
+            <p className="text-[11px] sm:text-xs text-blue-400 font-mono truncate">Carrier Operations & Network Automation</p>
           </div>
         </div>
-        <h3 className="mt-6 text-center text-base font-medium text-slate-300">
+        <h3 className="mt-5 sm:mt-6 text-center text-sm sm:text-base font-medium text-slate-300">
           Operator Console Login
         </h3>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">
-        <div className="bg-[#0f172a] py-8 px-6 shadow-2xl shadow-black/60 rounded-2xl border border-slate-800 sm:px-10">
+      <div className="mt-6 sm:mt-8 sm:mx-auto sm:w-full sm:max-w-md w-full px-1">
+        <div className="bg-[#0f172a] py-6 px-4 sm:py-8 sm:px-10 shadow-2xl shadow-black/60 rounded-2xl border border-slate-800">
           {errorMessage && (
             <div className="mb-5 p-3.5 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
               <ShieldAlert className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
-              <div className="text-xs text-rose-200 leading-relaxed">{errorMessage}</div>
+              <div className="text-xs text-rose-200 leading-relaxed break-words">{errorMessage}</div>
             </div>
           )}
 
@@ -132,7 +133,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@speednet.in"
-                  className="block w-full pl-10 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-3 py-2.5 min-h-[42px] bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
               </div>
             </div>
@@ -152,20 +153,21 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="block w-full pl-10 pr-10 py-2.5 bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  className="block w-full pl-10 pr-10 py-2.5 min-h-[42px] bg-slate-900 border border-slate-800 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center justify-center text-slate-500 hover:text-slate-300 min-h-[40px] min-w-[40px]"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <label className="flex items-center text-xs text-slate-400 cursor-pointer">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="flex items-center text-xs text-slate-400 cursor-pointer min-h-[32px]">
                 <input
                   type="checkbox"
                   checked={rememberMe}
@@ -180,7 +182,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex justify-center items-center gap-2 py-2.5 px-4 rounded-lg shadow-lg shadow-blue-600/30 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full flex justify-center items-center gap-2 py-2.5 min-h-[44px] px-4 rounded-lg shadow-lg shadow-blue-600/30 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {loading ? (
                 <>
@@ -196,9 +198,15 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-slate-800/80 text-center">
+          <div className="mt-6 pt-6 border-t border-slate-800/80 text-center flex flex-col gap-2">
+            <p className="text-xs text-slate-400">
+              New ISP?{' '}
+              <Link href="/register" className="text-blue-400 hover:text-blue-300 font-medium underline">
+                Register Organization & Create Account
+              </Link>
+            </p>
             <p className="text-[11px] text-slate-500">
-              ISP CRM v1.0 • Enterprise Core • FreeRADIUS 3.x & MikroTik RouterOS v7 Ready
+              ISP CRM v1.0 • Enterprise Core • Multi-Tenant Isolated
             </p>
           </div>
         </div>
