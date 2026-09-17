@@ -30,18 +30,6 @@ module.exports = {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
         },
-        plum: {
-          DEFAULT: '#24102F',
-          dark: '#1C0C25',
-          hover: '#3A1948',
-          light: '#4A1D60',
-          muted: '#C4B5FD',
-        },
-        brand: {
-          orange: '#FF6B35',
-          orangeHover: '#E85A2A',
-          purple: '#5B2A86',
-        },
       },
     },
   },

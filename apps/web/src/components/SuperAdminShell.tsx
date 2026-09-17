@@ -38,6 +38,7 @@ interface AdminUserProfile {
     id: string;
     name: string;
     slug: string;
+    email: string;
   };
 }
 
@@ -113,39 +114,40 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen w-full bg-[#F5F6F8] flex items-center justify-center text-[#64748B]">
+      <div className="min-h-screen w-full bg-[#090d16] flex items-center justify-center text-slate-400">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-[#FF6B35] border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-mono text-[#0F172A]">Authenticating Platform Super Admin...</span>
+          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-mono tracking-wide text-slate-400">
+            Validating Super Admin privileges...
+          </span>
         </div>
       </div>
     );
   }
 
-  // RBAC Access Guard: If not SUPER_ADMIN, present high-contrast security denial
+  // 403 Screen if non-super-admin tries to view Super Admin interface
   if (!isSuperAdmin) {
     return (
-      <div className="min-h-screen w-full bg-[#F5F6F8] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center mx-auto text-rose-600">
-            <ShieldAlert className="h-7 w-7" />
+      <div className="min-h-screen w-full bg-[#090d16] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900 border border-rose-900/40 rounded-2xl p-6 sm:p-8 text-center shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-5">
+            <ShieldAlert className="h-8 w-8" />
           </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-[#0F172A]">Super Admin Privilege Required</h2>
-            <p className="text-xs text-[#64748B]">
-              Your account role (<code className="text-rose-600 font-mono font-semibold">{profile?.role || 'OPERATOR'}</code>) is restricted to tenant operations and does not possess multi-tenant platform authority.
-            </p>
-          </div>
-          <div className="pt-2 flex flex-col sm:flex-row gap-2.5 justify-center">
+          <h1 className="text-xl font-bold text-slate-100 mb-2">Access Restricted</h1>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+            The Super Admin platform control panel requires <span className="text-rose-400 font-mono font-semibold">SUPER_ADMIN</span> privileges.
+            Your account is assigned role <span className="text-amber-400 font-mono font-semibold">{profile?.role || 'UNKNOWN'}</span>.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => router.push('/dashboard')}
-              className="btn-primary text-xs"
+              className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-indigo-600/20"
             >
-              Return to Operator CRM
+              Return to Tenant CRM
             </button>
             <button
               onClick={() => redirectToLogin()}
-              className="btn-secondary text-xs"
+              className="px-4 py-2.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-sm font-medium transition-colors"
             >
               Log Out
             </button>
@@ -156,54 +158,53 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
   }
 
   const sidebarContent = (isMobile: boolean) => (
-    <div className="flex flex-col h-full bg-[#24102F] text-[#E9D5FF] border-r border-[#3A1948]">
+    <div className="flex flex-col h-full bg-[#0b101d] border-r border-slate-800/80">
       {/* Brand Header */}
-      <div className="h-16 flex items-center justify-between px-5 border-b border-[#3A1948] shrink-0 bg-[#24102F]">
+      <div className="h-16 flex items-center justify-between px-5 border-b border-slate-800/80 shrink-0 bg-slate-950/40">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-[#FF6B35] to-[#E85A2A] flex items-center justify-center text-white font-bold shadow-md shadow-orange-500/25">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/25">
             <Shield className="h-5 w-5" />
           </div>
           <div>
-            <div className="font-bold text-white text-sm tracking-tight flex items-center gap-1.5">
-              ISPCRM <span className="px-1.5 py-0.2 text-[10px] font-mono font-semibold rounded bg-[#3A1948] text-[#E9D5FF] border border-[#5B2A86]/40">HQ</span>
+            <div className="font-bold text-slate-100 text-sm tracking-tight flex items-center gap-1.5">
+              ISPCRM <span className="px-1.5 py-0.2 text-[10px] font-mono font-semibold rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">HQ</span>
             </div>
-            <div className="text-[11px] text-[#C4B5FD] font-medium">SaaS Platform Operator</div>
+            <div className="text-[10px] text-indigo-400/90 font-mono font-medium">Platform Super Admin</div>
           </div>
         </div>
 
         {isMobile && (
           <button
-            type="button"
             onClick={() => setIsMobileNavOpen(false)}
-            className="p-1.5 text-[#C4B5FD] hover:text-white rounded-lg hover:bg-[#3A1948]"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
           >
             <X className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* Navigation */}
-      <div className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
+      {/* Main Nav */}
+      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
         <div>
-          <div className="px-3 mb-2 text-[10px] uppercase tracking-wider text-[#A855F7] font-bold">
-            Platform Core
+          <div className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            Platform Management
           </div>
           <nav className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isActive = pathname === item.href || (item.href !== '/super-admin' && pathname.startsWith(item.href));
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={isMobile ? () => setIsMobileNavOpen(false) : undefined}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all min-h-[40px] ${
+                  onClick={() => isMobile && setIsMobileNavOpen(false)}
+                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                     isActive
-                      ? 'bg-[#FF6B35] text-white shadow-md shadow-orange-500/25'
-                      : 'text-[#C4B5FD] hover:text-white hover:bg-[#3A1948]'
+                      ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-900/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80'
                   }`}
                 >
-                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-white' : 'text-[#C4B5FD]'}`} />
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
                   <span>{item.name}</span>
                 </Link>
               );
@@ -212,8 +213,8 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div>
-          <div className="px-3 mb-2 text-[10px] uppercase tracking-wider text-[#A855F7] font-bold">
-            Future Modules (Phase 6B+)
+          <div className="px-3 mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            Roadmap Modules
           </div>
           <div className="space-y-1">
             {futurePlaceholders.map((item) => {
@@ -221,16 +222,13 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
               return (
                 <div
                   key={item.name}
-                  className="flex items-center justify-between px-3 py-2 rounded-xl text-xs text-[#C4B5FD]/60 cursor-not-allowed opacity-70"
-                  title="Coming in upcoming commercialization phases"
+                  className="flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 opacity-60 cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className="h-4 w-4 shrink-0" />
+                    <Icon className="h-4 w-4" />
                     <span>{item.name}</span>
                   </div>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#3A1948] text-[#C4B5FD]">
-                    Soon
-                  </span>
+                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">Soon</span>
                 </div>
               );
             })}
@@ -238,125 +236,156 @@ export function SuperAdminShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {/* Tenant CRM Switcher link */}
-      <div className="p-3 border-t border-[#3A1948] shrink-0 bg-[#24102F]">
+      {/* Tenant CRM Switcher & Profile Footer */}
+      <div className="p-3 border-t border-slate-800/80 bg-slate-950/40 space-y-2 shrink-0">
         <Link
           href="/dashboard"
-          className="flex items-center justify-between p-2.5 rounded-xl bg-[#1C0C25]/90 border border-[#3A1948] hover:border-[#FF6B35]/40 text-xs font-medium text-[#E9D5FF] transition-colors group"
+          className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/90 transition-colors group"
         >
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-[#FF6B35]" />
-            <span>Switch to Tenant CRM</span>
-          </div>
-          <ExternalLink className="h-3.5 w-3.5 text-[#C4B5FD] group-hover:text-[#FF6B35]" />
+          <span className="flex items-center gap-2">
+            <ExternalLink className="h-3.5 w-3.5 text-indigo-400 group-hover:text-indigo-300" />
+            Switch to Tenant CRM
+          </span>
+          <span className="text-[10px] font-mono text-slate-500">app</span>
         </Link>
+
+        <div className="flex items-center justify-between px-2 pt-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-indigo-900/60 border border-indigo-700/50 flex items-center justify-center text-xs font-bold text-indigo-300 shrink-0">
+              SA
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-slate-200 truncate">{profile?.name || 'Super Admin'}</div>
+              <div className="text-[10px] font-mono text-indigo-400 truncate">{profile?.email || 'admin@platform'}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => redirectToLogin()}
+            title="Log Out"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <div className="flex min-h-screen w-full bg-[#F5F6F8] text-[#0F172A] overflow-x-hidden">
+    <div className="min-h-screen bg-[#090d16] text-slate-100 flex">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-64 flex-col h-screen shrink-0 sticky top-0 z-30 shadow-xl">
+      <aside className="hidden lg:flex w-64 flex-col fixed inset-y-0 left-0 z-30">
         {sidebarContent(false)}
       </aside>
 
       {/* Mobile Drawer */}
       {isMobileNavOpen && (
-        <>
+        <div className="fixed inset-0 z-50 lg:hidden flex">
           <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden animate-fadeIn"
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm"
             onClick={() => setIsMobileNavOpen(false)}
           />
-          <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] flex flex-col h-full shadow-2xl lg:hidden">
+          <div className="relative w-72 max-w-[85vw] h-full z-10">
             {sidebarContent(true)}
-          </aside>
-        </>
+          </div>
+        </div>
       )}
 
-      <div className="flex-1 flex flex-col min-w-0 w-full">
-        {/* Top Header */}
-        <header className="h-16 border-b border-[#E2E8F0] bg-white px-3 sm:px-6 flex items-center justify-between sticky top-0 z-20 w-full shadow-sm">
+      {/* Main Content Area */}
+      <div className="flex-1 lg:pl-64 flex flex-col min-h-screen min-w-0">
+        {/* Super Admin Top Header */}
+        <header className="h-16 bg-[#0b101d]/90 backdrop-blur border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button
-              type="button"
               onClick={() => setIsMobileNavOpen(true)}
-              className="lg:hidden p-2 text-[#475569] hover:text-[#0F172A] rounded-lg hover:bg-[#F1F5F9] min-h-[40px] min-w-[40px] flex items-center justify-center"
+              className="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-[#FFF7ED] text-[#FF6B35] border border-[#FED7AA] font-bold">
-                SUPER ADMIN
-              </span>
-              <span className="text-xs text-[#64748B] hidden md:inline-block font-medium">
-                Multi-Tenant SaaS Operator Engine
+            <div className="hidden sm:block">
+              <span className="text-xs font-semibold text-slate-400">Platform Control</span>
+              <span className="mx-2 text-slate-600">/</span>
+              <span className="text-xs font-semibold text-slate-200 capitalize">
+                {pathname.split('/')[2] || 'Dashboard'}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-3">
             {/* Theme Selector */}
             <div className="relative" ref={themeDropdownRef}>
               <button
-                type="button"
-                onClick={() => setIsThemeDropdownOpen((prev) => !prev)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] text-[#334155] text-xs font-semibold transition-colors"
+                onClick={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
               >
-                {theme === 'light' ? (
-                  <Sun className="h-3.5 w-3.5 text-[#FF6B35]" />
-                ) : theme === 'colorful' ? (
-                  <Palette className="h-3.5 w-3.5 text-[#8B5CF6]" />
-                ) : (
-                  <Moon className="h-3.5 w-3.5 text-[#3B82F6]" />
-                )}
+                {theme === 'dark' && <Moon className="h-3.5 w-3.5 text-blue-400" />}
+                {theme === 'light' && <Sun className="h-3.5 w-3.5 text-amber-400" />}
+                {theme === 'colorful' && <Palette className="h-3.5 w-3.5 text-purple-400" />}
                 <span className="capitalize">{theme}</span>
-                <ChevronDown className="h-3 w-3 text-[#94A3B8]" />
+                <ChevronDown className="h-3 w-3 text-slate-500" />
               </button>
 
               {isThemeDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-36 rounded-xl bg-white border border-[#E2E8F0] shadow-xl py-1 z-50 animate-fadeIn">
-                  {(['light', 'dark', 'colorful'] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => {
-                        setTheme(t);
-                        setIsThemeDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
-                        theme === t ? 'text-[#FF6B35] font-semibold bg-[#FFF7ED]' : 'text-[#334155] hover:bg-[#F8FAFC]'
-                      }`}
-                    >
-                      <span className="capitalize">{t}</span>
-                      {theme === t && <Check className="h-3 w-3" />}
-                    </button>
-                  ))}
+                <div className="absolute right-0 mt-2 w-36 rounded-xl bg-slate-900 border border-slate-800 shadow-xl py-1 z-50">
+                  <button
+                    onClick={() => {
+                      setTheme('dark');
+                      setIsThemeDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-slate-800 transition-colors ${
+                      theme === 'dark' ? 'text-blue-400 font-semibold' : 'text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Moon className="h-3.5 w-3.5" />
+                      <span>Dark</span>
+                    </div>
+                    {theme === 'dark' && <Check className="h-3 w-3" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTheme('light');
+                      setIsThemeDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-slate-800 transition-colors ${
+                      theme === 'light' ? 'text-amber-400 font-semibold' : 'text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Sun className="h-3.5 w-3.5" />
+                      <span>Light</span>
+                    </div>
+                    {theme === 'light' && <Check className="h-3 w-3" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTheme('colorful');
+                      setIsThemeDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-slate-800 transition-colors ${
+                      theme === 'colorful' ? 'text-purple-400 font-semibold' : 'text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-3.5 w-3.5" />
+                      <span>Colorful</span>
+                    </div>
+                    {theme === 'colorful' && <Check className="h-3 w-3" />}
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* Operator Info */}
-            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-[#E2E8F0]">
-              <div className="text-right">
-                <div className="text-xs font-bold text-[#0F172A]">{profile?.name}</div>
-                <div className="text-[10px] font-mono text-[#64748B]">SUPER_ADMIN</div>
-              </div>
+            {/* Platform Status Indicator */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>SUPER ADMIN ACTIVE</span>
             </div>
-
-            {/* Logout */}
-            <button
-              onClick={() => redirectToLogin()}
-              className="p-2 text-[#94A3B8] hover:text-[#DC2626] rounded-lg hover:bg-[#FFF1F2] transition-colors"
-              title="Sign out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
           </div>
         </header>
 
-        {/* Content */}
-        <main className="flex-1 p-3 sm:p-5 md:p-8 overflow-y-auto w-full min-w-0">
+        {/* Page Content */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {children}
         </main>
       </div>

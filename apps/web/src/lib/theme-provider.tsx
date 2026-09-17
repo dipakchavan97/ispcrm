@@ -15,7 +15,7 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
+  const [theme, setThemeState] = useState<Theme>('dark');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -25,10 +25,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         setThemeState(savedTheme);
         applyThemeClass(savedTheme);
       } else {
-        applyThemeClass('light');
+        applyThemeClass('dark');
       }
     } catch {
-      applyThemeClass('light');
+      applyThemeClass('dark');
     }
     setMounted(true);
   }, []);

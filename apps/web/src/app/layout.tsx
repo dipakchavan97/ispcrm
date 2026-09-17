@@ -25,11 +25,11 @@ export default function RootLayout({
               (function() {
                 try {
                   var saved = localStorage.getItem('ispcrm_theme');
-                  var theme = (saved === 'dark' || saved === 'colorful') ? saved : 'light';
+                  var theme = (saved === 'light' || saved === 'colorful') ? saved : 'dark';
                   document.documentElement.classList.remove('dark', 'light', 'colorful');
                   document.documentElement.classList.add(theme);
                 } catch (e) {
-                  document.documentElement.classList.add('light');
+                  document.documentElement.classList.add('dark');
                 }
               })();
             `,

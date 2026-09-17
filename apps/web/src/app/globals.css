@@ -2,65 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-/* =========================================================================
-   ISPCRM DESIGN TOKENS & DEFAULT THEME SPECIFICATION
-   Primary Visual Reference: Clean Enterprise SaaS with Plum Sidebar & Orange Accent
-   ========================================================================= */
-
 :root,
-.light {
-  /* Main Canvas & Typography */
-  --background: 220 14% 96%;           /* #F5F6F8 */
-  --foreground: 222 47% 11%;           /* #0F172A */
-
-  /* Cards & Elevated Surfaces */
-  --card: 0 0% 100%;                   /* #FFFFFF */
-  --card-foreground: 222 47% 11%;      /* #0F172A */
-  --border: 214 32% 91%;               /* #E2E8F0 */
-
-  /* Primary Action: Bright Vibrant Orange (#FF6B35) */
-  --primary: 16 100% 60%;              /* #FF6B35 */
-  --primary-foreground: 0 0% 100%;     /* #FFFFFF */
-  --primary-hover: 16 80% 54%;         /* #E85A2A */
-
-  /* Secondary & Neutral Tones */
-  --secondary: 210 40% 96.1%;          /* #F1F5F9 */
-  --secondary-foreground: 222 47% 11%; /* #0F172A */
-  --muted: 210 40% 95%;                /* #F1F5F9 */
-  --muted-foreground: 215.4 16.3% 44%; /* #64748B */
-  --accent: 16 100% 60%;
-  --accent-foreground: 0 0% 100%;
-
-  /* Sidebar Tokens (Deep Plum / Eggplant) */
-  --sidebar-bg: #24102F;
-  --sidebar-hover: #3A1948;
-  --sidebar-active: #FF6B35;
-  --sidebar-text: #E9D5FF;
-  --sidebar-muted: #C4B5FD;
-
-  /* Distinct Brand Colors */
-  --color-plum: #24102F;
-  --color-purple: #5B2A86;
-  --color-blue: #3B82F6;
-  --color-green: #16A34A;
-  --color-yellow: #F4B400;
-  --color-red: #DC2626;
-  --color-orange: #FF6B35;
-}
-
 .dark {
   --background: 222 47% 11%;     /* #0b1329 */
   --foreground: 210 40% 98%;     /* #f8fafc */
   --card: 224 45% 15%;           /* #0f172a */
   --card-foreground: 210 40% 98%;
   --border: 217 33% 22%;         /* #1e293b */
-  --primary: 16 100% 60%;        /* #FF6B35 */
-  --primary-foreground: 0 0% 100%;
+  --primary: 217 91% 60%;        /* #3b82f6 */
+  --primary-foreground: 222 47% 11%;
   --secondary: 217 33% 20%;
   --secondary-foreground: 210 40% 98%;
   --muted: 217 33% 18%;
   --muted-foreground: 215 20% 65%;
-  --accent: 16 100% 60%;
+  --accent: 217 91% 60%;
+  --accent-foreground: 210 40% 98%;
+}
+
+.light {
+  --background: 210 40% 98%;     /* #f8fafc */
+  --foreground: 222 47% 11%;     /* #0b1329 */
+  --card: 0 0% 100%;             /* #ffffff */
+  --card-foreground: 222 47% 11%;
+  --border: 214 32% 91%;         /* #e2e8f0 */
+  --primary: 221.2 83.2% 53.3%;  /* #2563eb */
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;    /* #f1f5f9 */
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 95%;          /* #f1f5f9 */
+  --muted-foreground: 215.4 16.3% 44%; /* #64748b */
+  --accent: 221.2 83.2% 53.3%;
   --accent-foreground: 210 40% 98%;
 }
 
@@ -81,35 +52,26 @@
 }
 
 body {
-  background-color: #F5F6F8;
-  color: #0F172A;
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   margin: 0;
   padding: 0;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* =========================================================================
-   DEFAULT SAAS LIGHT THEME SMART OVERRIDES
-   Applies by default to :root (unless .dark or .colorful is selected)
+   LIGHT THEME SMART OVERRIDES
+   Maps Tailwind dark utility defaults (slate-950, slate-900, slate-800)
+   to clean, high-contrast light mode surfaces without touching markup.
    ========================================================================= */
 
-:root:not(.dark):not(.colorful) body,
 .light body {
-  background-color: #F5F6F8 !important;
-  color: #0F172A !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
 }
 
-/* Page & Section Canvas */
-:root:not(.dark):not(.colorful) .bg-\[\#0b1329\],
-:root:not(.dark):not(.colorful) .bg-\[\#070d1e\],
-:root:not(.dark):not(.colorful) .bg-slate-950,
-:root:not(.dark):not(.colorful) .bg-slate-950\/50,
-:root:not(.dark):not(.colorful) .bg-slate-950\/60,
-:root:not(.dark):not(.colorful) .bg-slate-950\/80,
-:root:not(.dark):not(.colorful) .bg-slate-950\/85,
+/* Page Backgrounds */
 .light .bg-\[\#0b1329\],
 .light .bg-\[\#070d1e\],
 .light .bg-slate-950,
@@ -117,497 +79,146 @@ body {
 .light .bg-slate-950\/60,
 .light .bg-slate-950\/80,
 .light .bg-slate-950\/85 {
-  background-color: #F5F6F8 !important;
+  background-color: #f8fafc !important;
 }
 
-/* White Cards & Panels (Except when inside the Plum Sidebar) */
-:root:not(.dark):not(.colorful) main .bg-\[\#0f172a\],
-:root:not(.dark):not(.colorful) main .bg-\[\#0f172a\]\/80,
-:root:not(.dark):not(.colorful) main .bg-slate-900,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/90,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/80,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/60,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/50,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/40,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/30,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/20,
-:root:not(.dark):not(.colorful) main .bg-slate-900\/10,
-:root:not(.dark):not(.colorful) div:not(aside):not(aside *) > .bg-slate-900,
-.light main .bg-\[\#0f172a\],
-.light main .bg-\[\#0f172a\]\/80,
-.light main .bg-slate-900,
-.light main .bg-slate-900\/90,
-.light main .bg-slate-900\/80,
-.light main .bg-slate-900\/60,
-.light main .bg-slate-900\/50,
-.light main .bg-slate-900\/40,
-.light main .bg-slate-900\/30,
-.light main .bg-slate-900\/20,
-.light main .bg-slate-900\/10,
-.light div:not(aside):not(aside *) > .bg-slate-900 {
-  background-color: #FFFFFF !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+/* Cards & Surfaces */
+.light .bg-\[\#0f172a\],
+.light .bg-\[\#0f172a\]\/80,
+.light .bg-slate-900,
+.light .bg-slate-900\/90,
+.light .bg-slate-900\/80,
+.light .bg-slate-900\/60,
+.light .bg-slate-900\/50,
+.light .bg-slate-900\/40,
+.light .bg-slate-900\/30,
+.light .bg-slate-900\/20,
+.light .bg-slate-900\/10 {
+  background-color: #ffffff !important;
 }
 
-/* Elevated Sub-Cards & Panels in Main Content */
-:root:not(.dark):not(.colorful) main .bg-slate-800,
-:root:not(.dark):not(.colorful) main .bg-slate-800\/80,
-:root:not(.dark):not(.colorful) main .bg-slate-800\/60,
-:root:not(.dark):not(.colorful) main .bg-slate-800\/50,
-:root:not(.dark):not(.colorful) main .bg-slate-800\/40,
-:root:not(.dark):not(.colorful) main .bg-slate-800\/30,
-.light main .bg-slate-800,
-.light main .bg-slate-800\/80,
-.light main .bg-slate-800\/60,
-.light main .bg-slate-800\/50,
-.light main .bg-slate-800\/40,
-.light main .bg-slate-800\/30 {
-  background-color: #F8FAFC !important;
+/* Elevated Sub-Panels & Sidebar Elements */
+.light .bg-slate-800,
+.light .bg-slate-800\/80,
+.light .bg-slate-800\/60,
+.light .bg-slate-800\/50,
+.light .bg-slate-800\/40,
+.light .bg-slate-800\/30,
+.light .bg-slate-800\/20 {
+  background-color: #f1f5f9 !important;
 }
 
-/* Interactive Hover States */
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-800:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-700:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-800\/60:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-800\/50:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-800\/40:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-800\/30:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-900\/50:hover,
-:root:not(.dark):not(.colorful) main .hover\:bg-slate-900:hover,
-.light main .hover\:bg-slate-800:hover,
-.light main .hover\:bg-slate-700:hover,
-.light main .hover\:bg-slate-800\/60:hover,
-.light main .hover\:bg-slate-800\/50:hover,
-.light main .hover\:bg-slate-800\/40:hover,
-.light main .hover\:bg-slate-800\/30:hover,
-.light main .hover\:bg-slate-900\/50:hover,
-.light main .hover\:bg-slate-900:hover {
-  background-color: #F1F5F9 !important;
+/* Hover States */
+.light .hover\:bg-slate-800:hover,
+.light .hover\:bg-slate-800\/60:hover,
+.light .hover\:bg-slate-800\/50:hover,
+.light .hover\:bg-slate-800\/40:hover,
+.light .hover\:bg-slate-700\/50:hover,
+.light .hover\:bg-slate-700\/60:hover {
+  background-color: #e2e8f0 !important;
 }
 
-/* Structural Borders */
-:root:not(.dark):not(.colorful) main .border-slate-800,
-:root:not(.dark):not(.colorful) main .border-slate-700,
-:root:not(.dark):not(.colorful) main .border-slate-600,
-:root:not(.dark):not(.colorful) main .border-slate-800\/80,
-:root:not(.dark):not(.colorful) main .border-slate-800\/60,
-:root:not(.dark):not(.colorful) main .border-slate-800\/40,
-:root:not(.dark):not(.colorful) main .border-slate-700\/60,
-.light main .border-slate-800,
-.light main .border-slate-700,
-.light main .border-slate-600,
-.light main .border-slate-800\/80,
-.light main .border-slate-800\/60,
-.light main .border-slate-800\/40,
-.light main .border-slate-700\/60 {
-  border-color: #E2E8F0 !important;
+/* Borders & Dividers */
+.light .border-slate-800,
+.light .border-slate-800\/80,
+.light .border-slate-800\/60,
+.light .border-slate-800\/50,
+.light .border-slate-800\/40,
+.light .border-slate-700,
+.light .border-slate-700\/80,
+.light .border-slate-700\/60,
+.light .border-slate-700\/50,
+.light .border-slate-700\/40,
+.light .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+.light .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
 }
 
-/* Typography Hierarchy in Main Content */
-:root:not(.dark):not(.colorful) main .text-slate-100,
-:root:not(.dark):not(.colorful) main .text-slate-200,
-:root:not(.dark):not(.colorful) main .text-white:not(.kpi-card *):not(.badge-solid *):not(button *),
-.light main .text-slate-100,
-.light main .text-slate-200,
-.light main .text-white:not(.kpi-card *):not(.badge-solid *):not(button *) {
-  color: #0F172A !important;
+/* Typography Overrides */
+.light .text-white,
+.light .text-slate-100 {
+  color: #0f172a !important;
 }
 
-:root:not(.dark):not(.colorful) main .text-slate-300,
-:root:not(.dark):not(.colorful) main .text-slate-400:not(.kpi-card *),
-.light main .text-slate-300,
-.light main .text-slate-400:not(.kpi-card *) {
-  color: #475569 !important;
+.light .text-slate-200 {
+  color: #1e293b !important;
 }
 
-:root:not(.dark):not(.colorful) main .text-slate-500,
-.light main .text-slate-500 {
-  color: #64748B !important;
+.light .text-slate-300 {
+  color: #334155 !important;
 }
 
-:root:not(.dark):not(.colorful) main .text-slate-600,
-.light main .text-slate-600 {
-  color: #94A3B8 !important;
+.light .text-slate-400 {
+  color: #64748b !important;
 }
 
-/* Form Inputs, Selects, & Textareas */
-:root:not(.dark):not(.colorful) input:not([type="checkbox"]):not([type="radio"]),
-:root:not(.dark):not(.colorful) select,
-:root:not(.dark):not(.colorful) textarea,
+.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.light .placeholder-slate-500::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Inputs, Selects & Textareas */
 .light input:not([type="checkbox"]):not([type="radio"]),
 .light select,
 .light textarea {
-  background-color: #FFFFFF !important;
-  border-color: #CBD5E1 !important;
-  color: #0F172A !important;
-  border-radius: 0.5rem;
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
-:root:not(.dark):not(.colorful) input::placeholder,
-:root:not(.dark):not(.colorful) textarea::placeholder,
-.light input::placeholder,
-.light textarea::placeholder {
-  color: #94A3B8 !important;
-}
-
-:root:not(.dark):not(.colorful) input:focus,
-:root:not(.dark):not(.colorful) select:focus,
-:root:not(.dark):not(.colorful) textarea:focus,
 .light input:focus,
 .light select:focus,
 .light textarea:focus {
-  border-color: #FF6B35 !important;
-  box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.2) !important;
-  outline: none;
+  border-color: #2563eb !important;
 }
 
-/* Dropdown Menus & Popovers */
-:root:not(.dark):not(.colorful) [role="menu"],
+/* Dropdown Menus in Light Mode */
 .light [role="menu"] {
-  background-color: #FFFFFF !important;
-  border-color: #E2E8F0 !important;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
-  border-radius: 0.75rem;
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1) !important;
 }
 
-:root:not(.dark):not(.colorful) [role="menuitem"],
-.light [role="menuitem"] {
-  color: #334155 !important;
-}
-
-:root:not(.dark):not(.colorful) [role="menuitem"]:hover,
 .light [role="menuitem"]:hover {
-  background-color: #F1F5F9 !important;
-  color: #0F172A !important;
+  background-color: #f1f5f9 !important;
 }
 
-/* Tables in Light / Default Mode */
-:root:not(.dark):not(.colorful) th,
+/* Tables in Light Mode */
 .light th {
-  background-color: #F8FAFC !important;
+  background-color: #f8fafc !important;
   color: #475569 !important;
-  border-color: #E2E8F0 !important;
-  font-weight: 600 !important;
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
+  border-color: #e2e8f0 !important;
 }
 
-:root:not(.dark):not(.colorful) td,
 .light td {
-  border-color: #F1F5F9 !important;
+  border-color: #e2e8f0 !important;
 }
 
-:root:not(.dark):not(.colorful) tbody tr:hover,
-.light tbody tr:hover {
-  background-color: #F8FAFC !important;
-}
-
-/* High Contrast Status Badges in Light / Default Mode */
-:root:not(.dark):not(.colorful) .text-emerald-400,
-.light .text-emerald-400 {
-  color: #047857 !important;
-}
-:root:not(.dark):not(.colorful) .bg-emerald-500\/10,
-:root:not(.dark):not(.colorful) .bg-emerald-950\/40,
-:root:not(.dark):not(.colorful) .bg-emerald-950,
-.light .bg-emerald-500\/10,
-.light .bg-emerald-950\/40,
-.light .bg-emerald-950 {
-  background-color: #ECFDF5 !important;
-  border-color: #A7F3D0 !important;
-}
-
-:root:not(.dark):not(.colorful) .text-sky-400,
-.light .text-sky-400 {
-  color: #0369A1 !important;
-}
-:root:not(.dark):not(.colorful) .bg-sky-500\/10,
-.light .bg-sky-500\/10 {
-  background-color: #F0F9FF !important;
-  border-color: #BAE6FD !important;
-}
-
-:root:not(.dark):not(.colorful) .text-amber-400,
-.light .text-amber-400 {
-  color: #B45309 !important;
-}
-:root:not(.dark):not(.colorful) .bg-amber-500\/10,
-.light .bg-amber-500\/10 {
-  background-color: #FFFBEB !important;
-  border-color: #FDE68A !important;
-}
-
-:root:not(.dark):not(.colorful) .text-purple-400,
-.light .text-purple-400 {
-  color: #7E22CE !important;
-}
-:root:not(.dark):not(.colorful) .bg-purple-500\/10,
-.light .bg-purple-500\/10 {
-  background-color: #FAF5FF !important;
-  border-color: #E9D5FF !important;
-}
-
-:root:not(.dark):not(.colorful) .text-rose-400,
-.light .text-rose-400 {
-  color: #BE123C !important;
-}
-:root:not(.dark):not(.colorful) .bg-rose-500\/10,
-.light .bg-rose-500\/10 {
-  background-color: #FFF1F2 !important;
-  border-color: #FECDD3 !important;
-}
-
-:root:not(.dark):not(.colorful) .text-orange-400,
-.light .text-orange-400 {
-  color: #C2410C !important;
-}
-:root:not(.dark):not(.colorful) .bg-orange-500\/10,
-.light .bg-orange-500\/10 {
-  background-color: #FFF7ED !important;
-  border-color: #FED7AA !important;
-}
-
-:root:not(.dark):not(.colorful) .text-blue-400,
-.light .text-blue-400 {
-  color: #1D4ED8 !important;
-}
-:root:not(.dark):not(.colorful) .bg-blue-600\/10,
-:root:not(.dark):not(.colorful) .bg-blue-500\/10,
-.light .bg-blue-600\/10,
-.light .bg-blue-500\/10 {
-  background-color: #EFF6FF !important;
-  border-color: #BFDBFE !important;
-}
-
-/* SVG Chart Grids & Labels in Light / Default Mode */
-:root:not(.dark):not(.colorful) svg text.fill-slate-400,
-:root:not(.dark):not(.colorful) svg text.fill-slate-500,
+/* SVG Chart Elements in Light Mode */
 .light svg text.fill-slate-400,
 .light svg text.fill-slate-500 {
-  fill: #64748B !important;
+  fill: #64748b !important;
 }
-:root:not(.dark):not(.colorful) svg text.fill-white,
-:root:not(.dark):not(.colorful) svg text.fill-slate-200,
-.light svg text.fill-white,
+
+.light svg text.fill-slate-300,
 .light svg text.fill-slate-200 {
-  fill: #0F172A !important;
+  fill: #0f172a !important;
 }
-:root:not(.dark):not(.colorful) .text-slate-800\/80,
+
 .light .text-slate-800\/80 {
-  color: #E2E8F0 !important;
+  color: #e2e8f0 !important;
 }
-:root:not(.dark):not(.colorful) .text-slate-700,
+
 .light .text-slate-700 {
-  color: #CBD5E1 !important;
+  color: #cbd5e1 !important;
 }
 
 /* =========================================================================
-   REUSABLE DESIGN SYSTEM BUTTONS
-   ========================================================================= */
-
-.btn-primary {
-  background-color: #FF6B35 !important;
-  color: #FFFFFF !important;
-  font-weight: 600;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  transition: all 0.15s ease;
-  box-shadow: 0 2px 4px rgba(255, 107, 53, 0.25);
-  border: none;
-  cursor: pointer;
-}
-.btn-primary:hover {
-  background-color: #E85A2A !important;
-  box-shadow: 0 4px 8px rgba(255, 107, 53, 0.35);
-}
-
-.btn-secondary {
-  background-color: #FFFFFF !important;
-  color: #334155 !important;
-  font-weight: 500;
-  border: 1px solid #E2E8F0 !important;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  transition: all 0.15s ease;
-  cursor: pointer;
-}
-.btn-secondary:hover {
-  background-color: #F8FAFC !important;
-  color: #0F172A !important;
-  border-color: #CBD5E1 !important;
-}
-
-.btn-danger {
-  background-color: #DC2626 !important;
-  color: #FFFFFF !important;
-  font-weight: 600;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  transition: all 0.15s ease;
-  border: none;
-  cursor: pointer;
-}
-.btn-danger:hover {
-  background-color: #B91C1C !important;
-}
-
-.btn-success {
-  background-color: #16A34A !important;
-  color: #FFFFFF !important;
-  font-weight: 600;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  transition: all 0.15s ease;
-  border: none;
-  cursor: pointer;
-}
-.btn-success:hover {
-  background-color: #15803D !important;
-}
-
-/* =========================================================================
-   REFERENCE-INSPIRED COLORFUL KPI CARDS
-   Rich solid & gradient colors with white typography, watermark, and footer
-   ========================================================================= */
-
-.kpi-card {
-  position: relative;
-  overflow: hidden;
-  border-radius: 0.875rem; /* 14px */
-  padding: 1.25rem 1.25rem 0.875rem 1.25rem;
-  color: #FFFFFF !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.12), 0 4px 6px -4px rgba(0, 0, 0, 0.07);
-}
-
-.kpi-card .kpi-value {
-  color: #FFFFFF !important;
-  font-weight: 700;
-  font-size: 1.75rem; /* 28px */
-  letter-spacing: -0.025em;
-  line-height: 1.1;
-}
-
-.kpi-card .kpi-label {
-  color: rgba(255, 255, 255, 0.9) !important;
-  font-size: 0.8125rem; /* 13px */
-  font-weight: 500;
-  margin-top: 0.25rem;
-}
-
-.kpi-card .kpi-watermark {
-  position: absolute;
-  right: 1rem;
-  top: 1rem;
-  opacity: 0.18;
-  pointer-events: none;
-}
-
-.kpi-card .kpi-footer {
-  margin-top: 0.875rem;
-  padding-top: 0.625rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.kpi-card .kpi-footer:hover {
-  color: #FFFFFF;
-}
-
-/* Vibrant KPI Variants */
-.kpi-card-plum {
-  background: linear-gradient(135deg, #24102F 0%, #3e1b52 100%) !important;
-}
-
-.kpi-card-blue {
-  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important;
-}
-
-.kpi-card-gold {
-  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%) !important;
-}
-
-.kpi-card-red {
-  background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%) !important;
-}
-
-.kpi-card-green {
-  background: linear-gradient(135deg, #047857 0%, #10b981 100%) !important;
-}
-
-.kpi-card-purple {
-  background: linear-gradient(135deg, #4c1d95 0%, #7c3aed 100%) !important;
-}
-
-.kpi-card-orange {
-  background: linear-gradient(135deg, #c2410c 0%, #ea580c 100%) !important;
-}
-
-.kpi-card-amber {
-  background: linear-gradient(135deg, #92400e 0%, #d97706 100%) !important;
-}
-
-/* =========================================================================
-   DEEP PLUM SIDEBAR COMPONENT SCOPING
-   ========================================================================= */
-
-.sidebar-plum {
-  background-color: #24102F !important;
-  color: #E9D5FF !important;
-  border-right: 1px solid #3A1948 !important;
-}
-
-.sidebar-plum .nav-active {
-  background-color: #FF6B35 !important;
-  color: #FFFFFF !important;
-  font-weight: 600;
-  box-shadow: 0 4px 6px -1px rgba(255, 107, 53, 0.3);
-}
-
-.sidebar-plum .nav-item {
-  color: #C4B5FD !important;
-  transition: all 0.15s ease;
-}
-
-.sidebar-plum .nav-item:hover {
-  background-color: #3A1948 !important;
-  color: #FFFFFF !important;
-}
-
-.sidebar-plum .category-header {
-  color: #A855F7;
-  font-size: 0.6875rem; /* 11px */
-  font-weight: 700;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-}
-
-/* =========================================================================
-   COLORFUL THEME (ALTERNATIVE THEME)
+   COLORFUL THEME SMART OVERRIDES
+   Vibrant ISP / Carrier Palette: Deep Midnight Indigo, Violet & Cyan Accents
    ========================================================================= */
 
 .colorful body {
@@ -615,6 +226,7 @@ body {
   color: #f8fafc !important;
 }
 
+/* Page Backgrounds */
 .colorful .bg-\[\#0b1329\],
 .colorful .bg-\[\#070d1e\],
 .colorful .bg-slate-950,
@@ -625,6 +237,7 @@ body {
   background-color: #090d24 !important;
 }
 
+/* Cards & Surfaces */
 .colorful .bg-\[\#0f172a\],
 .colorful .bg-\[\#0f172a\]\/80,
 .colorful .bg-slate-900,
@@ -639,29 +252,61 @@ body {
   background-color: #121638 !important;
 }
 
+/* Elevated Sub-Panels & Sidebar Elements */
 .colorful .bg-slate-800,
 .colorful .bg-slate-800\/80,
 .colorful .bg-slate-800\/60,
 .colorful .bg-slate-800\/50,
 .colorful .bg-slate-800\/40,
-.colorful .bg-slate-800\/30 {
+.colorful .bg-slate-800\/30,
+.colorful .bg-slate-800\/20 {
   background-color: #1a1f4a !important;
 }
 
+/* Hover States */
 .colorful .hover\:bg-slate-800:hover,
-.colorful .hover\:bg-slate-700:hover,
 .colorful .hover\:bg-slate-800\/60:hover,
 .colorful .hover\:bg-slate-800\/50:hover,
 .colorful .hover\:bg-slate-800\/40:hover,
-.colorful .hover\:bg-slate-800\/30:hover,
-.colorful .hover\:bg-slate-900\/50:hover,
-.colorful .hover\:bg-slate-900:hover {
+.colorful .hover\:bg-slate-700\/50:hover,
+.colorful .hover\:bg-slate-700\/60:hover {
   background-color: #232a63 !important;
 }
 
+/* Borders & Dividers */
 .colorful .border-slate-800,
+.colorful .border-slate-800\/80,
+.colorful .border-slate-800\/60,
+.colorful .border-slate-800\/50,
+.colorful .border-slate-800\/40,
 .colorful .border-slate-700,
-.colorful .border-slate-600,
+.colorful .border-slate-700\/80,
+.colorful .border-slate-700\/60,
+.colorful .border-slate-700\/50,
+.colorful .border-slate-700\/40,
+.colorful .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+.colorful .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2b326e !important;
+}
+
+/* Typography Overrides in Colorful Mode */
+.colorful .text-slate-300 {
+  color: #c7d2fe !important;
+}
+
+.colorful .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+.colorful .text-slate-500 {
+  color: #64748b !important;
+}
+
+.colorful .placeholder-slate-500::placeholder {
+  color: #64748b !important;
+}
+
+.colorful .border-slate-800,
 .colorful .border-slate-800\/80,
 .colorful .border-slate-800\/60,
 .colorful .border-slate-800\/40,
@@ -669,6 +314,7 @@ body {
   border-color: #2b326e !important;
 }
 
+/* Inputs, Selects & Textareas */
 .colorful input:not([type="checkbox"]):not([type="radio"]),
 .colorful select,
 .colorful textarea {
@@ -683,6 +329,7 @@ body {
   border-color: #8b5cf6 !important;
 }
 
+/* Active Tabs & Navigation Accents */
 .colorful .text-blue-400 {
   color: #a78bfa !important;
 }
@@ -692,6 +339,7 @@ body {
   border-color: rgba(139, 92, 246, 0.3) !important;
 }
 
+/* Dropdown Menus in Colorful Mode */
 .colorful [role="menu"] {
   background-color: #121638 !important;
   border-color: #2b326e !important;
@@ -702,6 +350,7 @@ body {
   background-color: #232a63 !important;
 }
 
+/* Tables in Colorful Mode */
 .colorful th {
   background-color: #161b40 !important;
   color: #cbd5e1 !important;
@@ -712,6 +361,7 @@ body {
   border-color: #2b326e !important;
 }
 
+/* SVG Chart Elements in Colorful Mode */
 .colorful svg text.fill-slate-400,
 .colorful svg text.fill-slate-500 {
   fill: #94a3b8 !important;
